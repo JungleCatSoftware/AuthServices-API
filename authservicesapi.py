@@ -1,9 +1,10 @@
-from database.cassandra import CassandraCluster
+import sys
+import uuid
+from database.cassandra import setupKeyspace
 from flask import Flask
 from flask_restful import Resource, Api, reqparse
-import sys, uuid
 
-CassandraCluster.setupKeyspace('authdb')
+setupKeyspace('authdb')
 
 app = Flask(__name__)
 api = Api(app)
