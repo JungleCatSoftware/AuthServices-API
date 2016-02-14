@@ -181,8 +181,6 @@ class CassandraCluster:
                 """, (reqid,))
                 try:
                     CassandraCluster.doMigration(keyspace, reqid)
-                except Exception as e:
-                    raise e
                 finally:
                     session.execute("""
                         DELETE FROM schema_migration_requests
