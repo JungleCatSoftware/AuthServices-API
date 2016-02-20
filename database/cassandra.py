@@ -1,3 +1,10 @@
+"""
+Cassandra setup and management functions
+
+Contains a class for Cluster/Session singletons and functions for
+initialization and upgrade of Cassandra keyspace schema.
+"""
+
 import cassandra
 import datetime
 import os
@@ -13,10 +20,24 @@ from functools import wraps
 log = getLogger('gunicorn.error')
 
 class CassandraCluster:
+    """
+    Singleton class for Cassandra Cluster/Session objects
+
+    ``Cassandracluster.getSession(keyspace)`` returns a Cassandra session object
+    for the given keyspace
+    """
+
     cluster = None
     session = {}
 
     def getSession(keyspace=None):
+        """
+        Get a Cassandra session object for the given keyspace
+
+        :keyspace:
+            The keyspace for the requested session or None
+        """
+
         sessionLookup = '*' if keyspace is None else keyspace
         if sessionLookup not in CassandraCluster.session:
             if CassandraCluster.cluster is None:
@@ -25,6 +46,14 @@ class CassandraCluster:
         return CassandraCluster.session[sessionLookup]
 
 def tableExists(keyspace, table):
+    """
+    Determine if the given table exists in the keyspace
+
+    :keyspace:
+        The keyspace to check for the table
+    :table:
+        Table to check for
+    """
     if keyspace is None or table is None:
         return False
 
