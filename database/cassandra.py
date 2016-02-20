@@ -29,6 +29,7 @@ class CassandraCluster:
 
     cluster = None
     session = {}
+    preparedStmts = {}
 
     def getSession(keyspace=None):
         """
@@ -42,8 +43,25 @@ class CassandraCluster:
         if sessionLookup not in CassandraCluster.session:
             if CassandraCluster.cluster is None:
                  CassandraCluster.cluster = Cluster(['10.10.1.25'])
+                 CassandraCluster.session = {}
+                 CassandraCluster.preparedStmts = {}
             CassandraCluster.session[sessionLookup] = CassandraCluster.cluster.connect(keyspace)
+            CassandraCluster.preparedStmts[sessionLookup] = {}
         return CassandraCluster.session[sessionLookup]
+
+    def getPreparedStatement(statement, keyspace=None):
+        """
+        Get a prepared Cassandra statement, or create it if it doesn't exist
+        """
+
+        sessionLookup = '*' if keyspace is None else keyspace
+        if sessionLookup not in CassandraCluster.preparedStmts:
+            CassandraCluster.preparedStmts = {}
+
+        if statement not in CassandraCluster.preparedStmts[sessionLookup]:
+            session = CassandraCluster.getSession(keyspace)
+            CassandraCluster.preparedStmts[sessionLookup][statement] = session.prepare(statement)
+        return CassandraCluster.preparedStmts[sessionLookup][statement]
 
 def tableExists(keyspace, table):
     """
@@ -59,10 +77,11 @@ def tableExists(keyspace, table):
 
     session = CassandraCluster.getSession('system')
 
-    table_count = len(session.execute("""
+    lookuptable = CassandraCluster.getPreparedStatement("""
         SELECT columnfamily_name FROM schema_columnfamilies
-            WHERE keyspace_name='%s' and columnfamily_name='%s'
-    """%(keyspace,table)).current_rows)
+            WHERE keyspace_name=? and columnfamily_name=?
+    """, keyspace=session.keyspace)
+    table_count = len(session.execute(lookuptable, (keyspace,table)).current_rows)
 
     return True if table_count == 1 else False
 
