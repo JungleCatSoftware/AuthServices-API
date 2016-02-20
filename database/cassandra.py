@@ -86,16 +86,34 @@ def tableExists(keyspace, table):
     return True if table_count == 1 else False
 
 def updateReq(keyspace,reqid):
+    """
+    Update the lastupdate time on a reqid
+
+    :keyspace:
+        Keyspace the reqid applies to
+    :reqid:
+        ID of the request to be updated
+    """
+
     session = CassandraCluster.getSession(keyspace)
     t = datetime.datetime.now()
-    session.execute("""
+    reqUpdateQuery = CassandraCluster.getPreparedStatement("""
         UPDATE schema_migration_requests
-        SET lastupdate = %s
-        WHERE reqid = %s
-    """, (t,reqid))
+        SET lastupdate = ?
+        WHERE reqid = ?
+    """, keyspace=keyspace)
+    session.execute(reqUpdateQuery, (t,reqid))
 
 
 def schemaDir(scriptstype):
+    """
+    Wrapper for functions that execute CQL files to accept a directory instead
+    and pass the files contained in that directory to the original function.
+
+    Additionally calls updateReq() to ensure the lastupdate time is updated for
+    each file.
+    """
+
     def schemaDir_decorator(func):
         @wraps(func)
         def func_wrapper(path,keyspace,reqid):
@@ -120,6 +138,12 @@ def schemaDir(scriptstype):
 
 @schemaDir('baselines')
 def baseline(path,keyspace):
+    """
+    Execute a baseline CQL file to create tables within a keyspace. File must
+    be named for the table it represents and will not be executed if the table
+    already exists.
+    """
+
     session = CassandraCluster.getSession(keyspace)
     filestart = path.rfind('/')+1
     tablename = path[filestart:-4]
@@ -127,141 +151,281 @@ def baseline(path,keyspace):
     if not tableExists(keyspace, tablename):
         log.info('Running baseline script for "%s"'%(tablename,))
         query = open(path).read()
-        session.execute(query)
+        session.execute(SimpleStatement(query, consistency_level=ConsistencyLevel.QUORUM))
     else:
         log.info('Table "%s" already exists (skipping)'%(tablename,))
 
 @schemaDir('schema migrations')
 def migrateSchema(path,keyspace):
+    """
+    Execute a CQL schema migration script within a keyspace. File will not be run
+    if it is marked as successfully run in the schema_migrations table within the
+    keyspace.
+    """
+
     session = CassandraCluster.getSession(keyspace)
+
+    # Get the filename part
     filestart = path.rfind('/')+1
     filename = path[filestart:]
+
     log.info('Checking migration script "%s"'%(filename,))
-    script_migration_data = session.execute("""
+
+    # Get the migration history for the script
+    migrationScriptHistoryQuery = CassandraCluster.getPreparedStatement("""
         SELECT * FROM schema_migrations
-        WHERE scriptname = %s;
-    """,(filename,)).current_rows
-    rowcount = len(script_migration_data)
-    if rowcount == 0 or script_migration_data[-1].failed:
+        WHERE scriptname = ?;
+    """, keyspace=keyspace)
+    migrationScriptHistory = session.execute(migrationScriptHistoryQuery, (filename,)).current_rows
+
+    # Run if there is no history or the last execution failed
+    if ( len(migrationScriptHistory) == 0 or
+          migrationScriptHistory[-1].failed or not migrationScriptHistory[-1].run ):
         log.info('Running "%s" as it has not been run sucessfully'%(filename,))
+
         content = open(path).read()
         exectime = datetime.datetime.now()
-        session.execute(SimpleStatement("""
+
+        # Insert a record of this script into the schema_migrations table and mark as
+        #   not run and not failed.
+        migrationScriptRunInsert = CassandraCluster.getPreparedStatement("""
             INSERT INTO schema_migrations (scriptname, time, run, failed, error, content)
-                VALUES (%s, %s, false, false, '', %s)
-        """, consistency_level=ConsistencyLevel.QUORUM), (filename,exectime,content))
+                VALUES (?, ?, false, false, '', ?)
+        """, keyspace=keyspace)
+        migrationScriptRunInsert.consistency_level = ConsistencyLevel.QUORUM
+        session.execute(migrationScriptRunInsert, (filename,exectime,content))
+
         try:
+            # Run the migration script
             session.execute(SimpleStatement(content, consistency_level=ConsistencyLevel.QUORUM))
-            session.execute(SimpleStatement("""
+
+            log.info('Successfully ran "%s"'%(filename,))
+
+            # Update the script's run record as completed with success
+            migrationScriptUpdateSuccess = CassandraCluster.getPreparedStatement("""
                 UPDATE schema_migrations
                 SET run = true, failed = false
-                WHERE scriptname = %s AND time = %s
-            """, consistency_level=ConsistencyLevel.QUORUM), (filename,exectime))
+                WHERE scriptname = ? AND time = ?
+            """, keyspace=keyspace)
+            migrationScriptUpdateSuccess.consistency_level = ConsistencyLevel.QUORUM
+            session.execute(migrationScriptUpdateSuccess, (filename,exectime))
         except Exception as e:
-            session.execute(SimpleStatement("""
+            log.info('Failed to run "%s"'%(filename,))
+
+            # Log failure
+            migrationScriptUpdateFailure = CassandraCluster.getPreparedStatement("""
                 UPDATE schema_migrations
-                SET run = false, failed = true, error = %s
-                WHERE scriptname = %s AND time = %s
-            """, consistency_level=ConsistencyLevel.QUORUM), (str(e),filename,exectime))
+                SET run = false, failed = true, error = ?
+                WHERE scriptname = ? AND time = ?
+            """, keyspace=keyspace)
+            migrationScriptUpdateFailure.consistency_level = ConsistencyLevel.QUORUM
+            session.execute(migrationScriptUpdateFailure, (str(e),filename,exectime))
+
+            # Pass failure upwards
             raise e
     else:
-        log.info('Script "%s" has already been run on %s'%(filename,script_migration_data[-1].time))
+        log.info('Script "%s" has already been run on %s'%(filename,migrationScriptHistory[-1].time))
 
 def doMigration(keyspace, reqid):
     log.info('Selected for migration.')
+
     schemaroot = os.path.join(os.getcwd(), 'schema', keyspace)
+
     log.info('Checking for schema and migrations in "%s"'%(schemaroot,))
+
+    # Only migrate if there is a directory for the keyspace schema
     if os.path.isdir(schemaroot):
         baseline(os.path.join(schemaroot, 'baseline'), keyspace, reqid)
         migrateSchema(os.path.join(schemaroot, 'schema_migrations'), keyspace, reqid)
     else:
         log.info('No schema directory found for "%s"'%(keyspace,))
 
-def requestMigration(keyspace):
+def waitForMigrationCompletion(keyspace):
+    """
+    Wait for a migration task running on another node to complete
+
+    :keyspace:
+        Keyspace to wait to complete migrating
+    """
+
     session = CassandraCluster.getSession(keyspace)
+
+    migrationsRunning = True
+    migrationsFailedOrStalled = False
+
+    migrationRequestsQuery = CassandraCluster.getPreparedStatement("""
+        SELECT * FROM schema_migration_requests
+    """, keyspace=keyspace)
+
+    log.info('Waiting for migrations to complete on "%s"'%(keyspace,))
+
+    while migrationsRunning:
+        time.sleep(0.5)
+        migrationRequests = session.execute(migrationRequestsQuery).current_rows
+
+        if len(migrationRequests) == 0:
+            # No Migrations running/requested, we're finished waiting
+            migrationsRunning = False
+            break;
+
+        # Check for stale or failed migrations
+        staleTime = datetime.datetime.now() - datetime.timedelta(minutes=1)
+        for req in migrationRequests:
+            if ( req.failed or ( req.inprogress and req.lastupdate < staleTime ) ):
+                # We found a failed or stale request (that had started),
+                #   we should re-request a migration
+                migrationsRunning = False
+                migrationsFailedOrStalled = True
+
+    log.info('Finished waiting for migration of "%s"'%(keyspace,))
+    if migrationsFailedOrStalled:
+        log.warning('Detected failed migration of "%s", will re-request migration'%(keyspace,))
+        requestMigration(keyspace)
+
+
+def requestMigration(keyspace):
+    """
+    Request migration tasks on a keyspace, run if selected or wait if not
+
+    :keyspace:
+        Keyspace naem to request migration task on
+    """
+
+    session = CassandraCluster.getSession(keyspace)
+
+    # Pre-fetch these prepared statements as they are used more than once
+    deleteReqQuery = CassandraCluster.getPreparedStatement("""
+        DELETE FROM schema_migration_requests
+        WHERE reqid = ?
+    """, keyspace=keyspace)
 
     log.info('Checking schema migration requests table')
 
-    rawmigrationrequests = session.execute("""
+    migrationRequestsQuery = CassandraCluster.getPreparedStatement("""
         SELECT * FROM schema_migration_requests
-    """).current_rows
+    """, keyspace=keyspace)
+    rawMigrationRequests = session.execute(migrationRequestsQuery).current_rows
 
-    migrationrequests = []
-    deletebefore = datetime.datetime.now() - datetime.timedelta(minutes=1)
+    migrationRequests = []
+    staleTime = datetime.datetime.now() - datetime.timedelta(minutes=1)
 
-    for req in rawmigrationrequests:
-        if ( ( not req.inprogress and req.reqtime < deletebefore ) or
-             ( req.inprogress and req.lastupdate < deletebefore ) ):
+    for req in rawMigrationRequests:
+        # A request is "stale" if it is not in progress and it's request time
+        #   is older than 1 minute (something happend while waiting), or if it
+        #   is in progress but hasn't been updated in more than 1 minute
+        #   (something happened while it was updating), or if it is marked as
+        #   "failed" (something else happened and the update was aborted).
+        if ( req.failed or ( not req.inprogress and req.reqtime < staleTime ) or
+             ( req.inprogress and req.lastupdate < staleTime ) ):
+            # Delete the "stale" request (cleanup task)
             try:
                 log.info('Found stale request %s, deleting'%(req.reqid,))
-                session.execute("""
-                    DELETE FROM schema_migration_requests
-                    WHERE reqid = %s
-                """, (req.reqid,))
+                session.execute(deleteReqQuery, (req.reqid,))
             except:
                 pass
         else:
-            migrationrequests.append(req)
+            # Keep the record and continue
+            migrationRequests.append(req)
 
-    if len(migrationrequests) == 0:
+    if len(migrationRequests) == 0:
+        # No other pending/active migration requests
+
         reqid = uuid.uuid4()
         t = datetime.datetime.now()
+
         log.info('No outstanding migration requests, requesting migration with ID %s'%(reqid,))
-        session.execute(SimpleStatement("""
-            INSERT INTO schema_migration_requests (reqid, reqtime, inprogress, lastupdate)
-            VALUES (%s, %s, false, %s)
-        """, consistency_level=ConsistencyLevel.QUORUM), (reqid, t, t))
-        time.sleep(5)
 
-        log.info('Checking migration requests table once more')
-        migrationrequests = session.execute("""
+        # Nominate ourselves to run migration tasks
+        requestMigrationQuery = CassandraCluster.getPreparedStatement("""
+            INSERT INTO schema_migration_requests (reqid, reqtime, inprogress, failed, lastupdate)
+            VALUES (?, ?, false, false, ?)
+        """, keyspace=keyspace)
+        requestMigrationQuery.consistency_level=ConsistencyLevel.QUORUM
+        session.execute(requestMigrationQuery, (reqid, t, t))
+
+        time.sleep(2)
+
+        log.info('Checking migration requests table to see if we are selected for migration')
+
+        # Check and see if we were selected
+        migrationRequestsQuery = CassandraCluster.getPreparedStatement("""
             SELECT * FROM schema_migration_requests
-        """).current_rows
+        """, keyspace=keyspace)
+        migrationRequests = session.execute(migrationRequestsQuery).current_rows
 
-        migrationrequests = sorted(migrationrequests, key=lambda x: x.reqtime)
+        # Sort by request time
+        migrationRequests = sorted(migrationRequests, key=lambda x: x.reqtime)
 
-        if ( len(migrationrequests) == 1 or
-             migrationrequests[0].reqid == reqid ):
-            session.execute("""
+        if ( migrationRequests[0].reqid == reqid ):
+            # We were selected (only request or first request)
+
+            t = datetime.datetime.now()
+
+            # Mark ourselves as "In Progress"
+            markRequestInProgressQuery = CassandraCluster.getPreparedStatement(
+            """
                 UPDATE schema_migration_requests
-                SET inprogress = true
-                WHERE reqid = %s
-            """, (reqid,))
-            try:
-                doMigration(keyspace, reqid)
-            finally:
-                session.execute("""
-                    DELETE FROM schema_migration_requests
-                    WHERE reqid = %s
-                """, (reqid,))
-        else:
-            log.info('Not selected for migration')
-            session.execute("""
-                DELETE FROM schema_migration_requests
-                WHERE reqid = %s
-            """, (reqid,))
-            time.sleep(10) #temporary
-    else:
-        log.info('Not selected for migration')
-        time.sleep(10) #temporary
+                SET inprogress = true,
+                lastupdate = ?
+                WHERE reqid = ?
+            """, keyspace=keyspace)
+            session.execute(markRequestInProgressQuery, (t, reqid))
 
+            try:
+                # Run migration
+                doMigration(keyspace, reqid)
+
+                # Delete our req if successfully completed
+                session.execute(deleteReqQuery, (reqid,))
+
+                log.info('Migration completed successfully')
+            except Exception as e:
+                log.info('Migration failed')
+
+                # Something went wrong, mark our req as failed
+                t = datetime.datetime.now()
+                reqFailedQuery = CassandraCluster.getPreparedStatement("""
+                    UPDATE schema_migration_requests
+                    SET lastupdate = ?,
+                    failed = true,
+                    inprogress = false
+                    WHERE reqid = ?
+                """, keyspace=keyspace)
+                session.execute(reqFailedQuery, (t,reqid))
+
+                raise e
+        else:
+            log.info('Not selected for migration (lost election)')
+
+            # Not selected, delete our request
+            session.execute(deleteReqQuery, (reqid,))
+
+            # Wait for selected node to complete the migration
+            waitForMigrationCompletion(keyspace)
+    else:
+        log.info('Not selected for migration (in progress)')
+
+        # Wait for migration to complete
+        waitForMigrationCompletion(keyspace)
 
 def setupKeyspace(keyspace):
     session = CassandraCluster.getSession()
 
     try:
         log.info('Creating Keyspace "%s"'%(keyspace,))
+        # Try to create keyspace, ignore if it already exists
         session.execute(SimpleStatement("""
             CREATE KEYSPACE %s WITH replication
                 = {'class': '%s', 'replication_factor': %s};
         """%(keyspace,'SimpleStrategy',1), consistency_level=ConsistencyLevel.QUORUM))
     except cassandra.AlreadyExists as e:
         log.info('Keyspace "%s" already exists (skipping)'%(keyspace,))
-        pass
 
     session = CassandraCluster.getSession(keyspace)
 
     if not tableExists(keyspace, 'schema_migrations'):
+        # Create the schema_migrations table. This table stores the history
+        #   of schema update scripts that have been run against the keyspace.
         try:
             log.info('Creating Schema Migrations table')
             session.execute(SimpleStatement("""
@@ -279,6 +443,9 @@ def setupKeyspace(keyspace):
             log.info('Failed to create Schema Migrations table (Ignoring)')
 
     if not tableExists(keyspace, 'schema_migration_requests'):
+        # Create schema_migration_requests table. This table is used to manage
+        #   and coordinate multiple nodes requesting schema update/migrations
+        #   in order to ensure only one attempts to alter schema at any time.
         try:
             log.info('Creating Schema Migration Requests table')
             session.execute(SimpleStatement("""
@@ -286,6 +453,7 @@ def setupKeyspace(keyspace):
                     reqid uuid,
                     reqtime timestamp,
                     inprogress boolean,
+                    failed boolean,
                     lastupdate timestamp,
                     PRIMARY KEY (reqid)
                     )
@@ -296,4 +464,5 @@ def setupKeyspace(keyspace):
     # Just to prevent race conditions on creation and read
     time.sleep(1)
 
+    # Request migration tasks
     requestMigration(keyspace)
