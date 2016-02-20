@@ -14,10 +14,13 @@ import uuid
 from cassandra import ConsistencyLevel
 from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement
-from logging import getLogger
 from functools import wraps
+from logging import getLogger
+from settings import Settings
 
 log = getLogger('gunicorn.error')
+
+config = Settings.getConfig()
 
 class CassandraCluster:
     """
@@ -42,7 +45,8 @@ class CassandraCluster:
         sessionLookup = '*' if keyspace is None else keyspace
         if sessionLookup not in CassandraCluster.session:
             if CassandraCluster.cluster is None:
-                 CassandraCluster.cluster = Cluster(['10.10.1.25'])
+                 CassandraCluster.cluster = Cluster(config['cassandra']['nodes'],
+                         port=int(config['cassandra']['port']))
                  CassandraCluster.session = {}
                  CassandraCluster.preparedStmts = {}
             CassandraCluster.session[sessionLookup] = CassandraCluster.cluster.connect(keyspace)
