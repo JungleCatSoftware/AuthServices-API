@@ -155,7 +155,14 @@ def baseline(path,keyspace):
     if not tableExists(keyspace, tablename):
         log.info('Running baseline script for "%s"'%(tablename,))
         query = open(path).read()
-        session.execute(SimpleStatement(query, consistency_level=ConsistencyLevel.QUORUM))
+        try:
+            session.execute(SimpleStatement(query, consistency_level=ConsistencyLevel.QUORUM))
+        except Exception as e:
+            if tableExists(keyspace, tablename):
+                # Somehow we got in this state that we shouldn't get in
+                log.warning('Error creating table "%s": Tried to create a table that already exists!'%(tablename,))
+            else:
+                raise e
     else:
         log.info('Table "%s" already exists (skipping)'%(tablename,))
 
