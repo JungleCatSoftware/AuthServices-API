@@ -9,7 +9,7 @@ log = getLogger('gunicorn.error')
 
 config = Settings.getConfig()
 
-setupKeyspace('authdb')
+setupKeyspace(config['cassandra']['auth_keyspace'])
 
 app = Flask(__name__)
 api = Api(app)

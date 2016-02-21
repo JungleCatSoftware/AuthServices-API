@@ -10,8 +10,10 @@ class Settings:
 
     config = {
             'cassandra': {
+                'cluster': 'AuthServices',
                 'nodes': [ '127.0.0.1' ],
-                'port': '9042'
+                'port': '9042',
+                'auth_keyspace': 'authdb'
                 }
             }
 
