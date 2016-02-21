@@ -15,7 +15,7 @@ app = Flask(__name__)
 api = Api(app)
 
 api.add_resource(apis.users.Users, '/users')
-api.add_resource(apis.users.User, '/users/<userid>')
+api.add_resource(apis.users.User, '/users/<string:username>@<string:org>')
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -1,5 +1,8 @@
 CREATE TABLE users (
+  username text,
+  org text,
   email text,
-  validated boolean,
-  PRIMARY KEY (email)
+  parentuser text,
+  createdate timestamp,
+  PRIMARY KEY (org, username)
 );

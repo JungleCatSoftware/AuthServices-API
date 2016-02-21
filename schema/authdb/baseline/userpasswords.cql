@@ -1,6 +1,7 @@
 CREATE TABLE userpasswords (
-  email text,
+  username text,
+  org text,
   hash text,
   hashsequece text,
-  PRIMARY KEY (email)
+  PRIMARY KEY (org, username)
 );
