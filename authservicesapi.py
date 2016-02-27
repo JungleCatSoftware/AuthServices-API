@@ -1,7 +1,7 @@
 import apis.users
 from database.cassandra import setupKeyspace
 from flask import Flask
-from flask_restful import Resource, Api, reqparse
+from flask_restful import Api
 from logging import getLogger
 from settings import Settings
 

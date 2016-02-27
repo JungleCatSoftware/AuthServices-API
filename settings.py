@@ -32,12 +32,12 @@ class Settings:
                     def mergeConfig(a, b):
                         for key in a.keys():
                             if key in b:
-                                if isinstance(a[key],dict):
-                                    a[key] = mergeConfig(a[key],b[key])
+                                if isinstance(a[key], dict):
+                                    a[key] = mergeConfig(a[key], b[key])
                                 else:
                                     a[key] = b[key]
                         return a
 
-                    Settings.config = mergeConfig(Settings.config,json.load(f))
+                    Settings.config = mergeConfig(Settings.config, json.load(f))
             Settings.loaded = True
         return Settings.config

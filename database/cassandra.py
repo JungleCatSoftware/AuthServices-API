@@ -8,7 +8,6 @@ initialization and upgrade of Cassandra keyspace schema.
 import cassandra
 import datetime
 import os
-import sys
 import time
 import uuid
 from cassandra import ConsistencyLevel
@@ -21,6 +20,7 @@ from settings import Settings
 log = getLogger('gunicorn.error')
 
 config = Settings.getConfig()
+
 
 class CassandraCluster:
     """
@@ -45,11 +45,13 @@ class CassandraCluster:
         sessionLookup = '*' if keyspace is None else keyspace
         if sessionLookup not in CassandraCluster.session:
             if CassandraCluster.cluster is None:
-                 CassandraCluster.cluster = Cluster(config['cassandra']['nodes'],
-                         port=int(config['cassandra']['port']))
-                 CassandraCluster.session = {}
-                 CassandraCluster.preparedStmts = {}
-            CassandraCluster.session[sessionLookup] = CassandraCluster.cluster.connect(keyspace)
+                CassandraCluster.cluster = Cluster(
+                    config['cassandra']['nodes'],
+                    port=int(config['cassandra']['port']))
+                CassandraCluster.session = {}
+                CassandraCluster.preparedStmts = {}
+            CassandraCluster.session[sessionLookup] = \
+                CassandraCluster.cluster.connect(keyspace)
             CassandraCluster.preparedStmts[sessionLookup] = {}
         return CassandraCluster.session[sessionLookup]
 
@@ -64,8 +66,10 @@ class CassandraCluster:
 
         if statement not in CassandraCluster.preparedStmts[sessionLookup]:
             session = CassandraCluster.getSession(keyspace)
-            CassandraCluster.preparedStmts[sessionLookup][statement] = session.prepare(statement)
+            CassandraCluster.preparedStmts[sessionLookup][statement] = \
+                session.prepare(statement)
         return CassandraCluster.preparedStmts[sessionLookup][statement]
+
 
 def tableExists(keyspace, table):
     """
@@ -85,11 +89,13 @@ def tableExists(keyspace, table):
         SELECT columnfamily_name FROM schema_columnfamilies
             WHERE keyspace_name=? and columnfamily_name=?
     """, keyspace=session.keyspace)
-    table_count = len(session.execute(lookuptable, (keyspace,table)).current_rows)
+    table_count = len(session.execute(lookuptable,
+                                      (keyspace, table)).current_rows)
 
     return True if table_count == 1 else False
 
-def updateReq(keyspace,reqid):
+
+def updateReq(keyspace, reqid):
     """
     Update the lastupdate time on a reqid
 
@@ -106,7 +112,7 @@ def updateReq(keyspace,reqid):
         SET lastupdate = ?
         WHERE reqid = ?
     """, keyspace=keyspace)
-    session.execute(reqUpdateQuery, (t,reqid))
+    session.execute(reqUpdateQuery, (t, reqid))
 
 
 def schemaDir(scriptstype):
@@ -120,28 +126,29 @@ def schemaDir(scriptstype):
 
     def schemaDir_decorator(func):
         @wraps(func)
-        def func_wrapper(path,keyspace,reqid):
+        def func_wrapper(path, keyspace, reqid):
             if os.path.isdir(path):
-                log.info('Loading %s from "%s"'%(scriptstype,path))
+                log.info('Loading %s from "%s"' % (scriptstype, path))
                 contents = os.listdir(path)
                 contents.sort()
                 for f in contents:
                     filepath = os.path.join(path, f)
                     if os.path.isfile(filepath):
                         if f.endswith('.cql'):
-                            func(filepath,keyspace)
-                            updateReq(keyspace,reqid)
+                            func(filepath, keyspace)
+                            updateReq(keyspace, reqid)
                         else:
-                            log.info('Skipping non-CQL file "%s"'%(filepath,))
+                            log.info('Skipping non-CQL file "%s"' % (filepath,))
                     else:
-                        log.info('Skipping non-file "%s"'%(filepath,))
+                        log.info('Skipping non-file "%s"' % (filepath,))
             else:
-                log.info('No %s found for "%s"'%(scriptstype,keyspace))
+                log.info('No %s found for "%s"' % (scriptstype, keyspace))
         return func_wrapper
     return schemaDir_decorator
 
+
 @schemaDir('baselines')
-def baseline(path,keyspace):
+def baseline(path, keyspace):
     """
     Execute a baseline CQL file to create tables within a keyspace. File must
     be named for the table it represents and will not be executed if the table
@@ -151,27 +158,30 @@ def baseline(path,keyspace):
     session = CassandraCluster.getSession(keyspace)
     filestart = path.rfind('/')+1
     tablename = path[filestart:-4]
-    log.info('Checking table "%s"'%(tablename,))
+    log.info('Checking table "%s"' % (tablename,))
     if not tableExists(keyspace, tablename):
-        log.info('Running baseline script for "%s"'%(tablename,))
+        log.info('Running baseline script for "%s"' % (tablename,))
         query = open(path).read()
         try:
-            session.execute(SimpleStatement(query, consistency_level=ConsistencyLevel.QUORUM))
+            session.execute(SimpleStatement(query,
+                            consistency_level=ConsistencyLevel.QUORUM))
         except Exception as e:
             if tableExists(keyspace, tablename):
                 # Somehow we got in this state that we shouldn't get in
-                log.warning('Error creating table "%s": Tried to create a table that already exists!'%(tablename,))
+                log.warning('Error creating table "%s": ' % (tablename,) +
+                            'Tried to create a table that already exists!')
             else:
                 raise e
     else:
-        log.info('Table "%s" already exists (skipping)'%(tablename,))
+        log.info('Table "%s" already exists (skipping)' % (tablename,))
+
 
 @schemaDir('schema migrations')
-def migrateSchema(path,keyspace):
+def migrateSchema(path, keyspace):
     """
-    Execute a CQL schema migration script within a keyspace. File will not be run
-    if it is marked as successfully run in the schema_migrations table within the
-    keyspace.
+    Execute a CQL schema migration script within a keyspace. File will not be
+    run if it is marked as successfully run in the schema_migrations table
+    within the keyspace.
     """
 
     session = CassandraCluster.getSession(keyspace)
@@ -180,76 +190,91 @@ def migrateSchema(path,keyspace):
     filestart = path.rfind('/')+1
     filename = path[filestart:]
 
-    log.info('Checking migration script "%s"'%(filename,))
+    log.info('Checking migration script "%s"' % (filename,))
 
     # Get the migration history for the script
     migrationScriptHistoryQuery = CassandraCluster.getPreparedStatement("""
         SELECT * FROM schema_migrations
         WHERE scriptname = ?;
     """, keyspace=keyspace)
-    migrationScriptHistory = session.execute(migrationScriptHistoryQuery, (filename,)).current_rows
+    migrationScriptHistory = session.execute(migrationScriptHistoryQuery,
+                                             (filename,)).current_rows
 
     # Run if there is no history or the last execution failed
-    if ( len(migrationScriptHistory) == 0 or
-          migrationScriptHistory[-1].failed or not migrationScriptHistory[-1].run ):
-        log.info('Running "%s" as it has not been run sucessfully'%(filename,))
+    if (len(migrationScriptHistory) == 0 or
+            migrationScriptHistory[-1].failed or
+            not migrationScriptHistory[-1].run):
+
+        log.info('Running "%s" as it has not been run sucessfully' %
+                 (filename,))
 
         content = open(path).read()
         exectime = datetime.datetime.now()
 
-        # Insert a record of this script into the schema_migrations table and mark as
-        #   not run and not failed.
+        # Insert a record of this script into the schema_migrations table and
+        #   mark as not run and not failed.
         migrationScriptRunInsert = CassandraCluster.getPreparedStatement("""
-            INSERT INTO schema_migrations (scriptname, time, run, failed, error, content)
+            INSERT INTO schema_migrations (scriptname, time, run, failed,
+                error, content)
                 VALUES (?, ?, false, false, '', ?)
         """, keyspace=keyspace)
         migrationScriptRunInsert.consistency_level = ConsistencyLevel.QUORUM
-        session.execute(migrationScriptRunInsert, (filename,exectime,content))
+        session.execute(migrationScriptRunInsert, (filename, exectime, content))
 
         try:
             # Run the migration script
-            session.execute(SimpleStatement(content, consistency_level=ConsistencyLevel.QUORUM))
+            session.execute(SimpleStatement(content,
+                            consistency_level=ConsistencyLevel.QUORUM))
 
-            log.info('Successfully ran "%s"'%(filename,))
+            log.info('Successfully ran "%s"' % (filename,))
 
             # Update the script's run record as completed with success
-            migrationScriptUpdateSuccess = CassandraCluster.getPreparedStatement("""
-                UPDATE schema_migrations
-                SET run = true, failed = false
-                WHERE scriptname = ? AND time = ?
-            """, keyspace=keyspace)
-            migrationScriptUpdateSuccess.consistency_level = ConsistencyLevel.QUORUM
-            session.execute(migrationScriptUpdateSuccess, (filename,exectime))
+            migrationScriptUpdateSuccess = \
+                CassandraCluster.getPreparedStatement("""
+                    UPDATE schema_migrations
+                    SET run = true, failed = false
+                    WHERE scriptname = ? AND time = ?
+                """, keyspace=keyspace)
+            migrationScriptUpdateSuccess.consistency_level = \
+                ConsistencyLevel.QUORUM
+            session.execute(migrationScriptUpdateSuccess, (filename, exectime))
         except Exception as e:
-            log.info('Failed to run "%s"'%(filename,))
+            log.info('Failed to run "%s"' % (filename,))
 
             # Log failure
-            migrationScriptUpdateFailure = CassandraCluster.getPreparedStatement("""
-                UPDATE schema_migrations
-                SET run = false, failed = true, error = ?
-                WHERE scriptname = ? AND time = ?
-            """, keyspace=keyspace)
-            migrationScriptUpdateFailure.consistency_level = ConsistencyLevel.QUORUM
-            session.execute(migrationScriptUpdateFailure, (str(e),filename,exectime))
+            migrationScriptUpdateFailure = \
+                CassandraCluster.getPreparedStatement("""
+                    UPDATE schema_migrations
+                    SET run = false, failed = true, error = ?
+                    WHERE scriptname = ? AND time = ?
+                """, keyspace=keyspace)
+            migrationScriptUpdateFailure.consistency_level = \
+                ConsistencyLevel.QUORUM
+            session.execute(migrationScriptUpdateFailure,
+                            (str(e), filename, exectime))
 
             # Pass failure upwards
             raise e
     else:
-        log.info('Script "%s" has already been run on %s'%(filename,migrationScriptHistory[-1].time))
+        log.info('Script "%s" has already been run on %s' %
+                 (filename, migrationScriptHistory[-1].time))
+
 
 def doMigration(keyspace, reqid):
     log.info('Selected for migration.')
 
     schemaroot = os.path.join(os.getcwd(), 'schema', keyspace)
 
-    log.info('Checking for schema and migrations in "%s"'%(schemaroot,))
+    log.info('Checking for schema and migrations in "%s"' % (schemaroot,))
 
     # Only migrate if there is a directory for the keyspace schema
     if os.path.isdir(schemaroot):
         baseline(os.path.join(schemaroot, 'baseline'), keyspace, reqid)
-        migrateSchema(os.path.join(schemaroot, 'schema_migrations'), keyspace, reqid)
+        migrateSchema(os.path.join(schemaroot, 'schema_migrations'),
+                      keyspace, reqid)
     else:
-        log.info('No schema directory found for "%s"'%(keyspace,))
+        log.info('No schema directory found for "%s"' % (keyspace,))
+
 
 def waitForMigrationCompletion(keyspace):
     """
@@ -268,7 +293,7 @@ def waitForMigrationCompletion(keyspace):
         SELECT * FROM schema_migration_requests
     """, keyspace=keyspace)
 
-    log.info('Waiting for migrations to complete on "%s"'%(keyspace,))
+    log.info('Waiting for migrations to complete on "%s"' % (keyspace,))
 
     while migrationsRunning:
         time.sleep(0.5)
@@ -277,20 +302,21 @@ def waitForMigrationCompletion(keyspace):
         if len(migrationRequests) == 0:
             # No Migrations running/requested, we're finished waiting
             migrationsRunning = False
-            break;
+            break
 
         # Check for stale or failed migrations
         staleTime = datetime.datetime.now() - datetime.timedelta(minutes=1)
         for req in migrationRequests:
-            if ( req.failed or ( req.inprogress and req.lastupdate < staleTime ) ):
+            if (req.failed or (req.inprogress and req.lastupdate < staleTime)):
                 # We found a failed or stale request (that had started),
                 #   we should re-request a migration
                 migrationsRunning = False
                 migrationsFailedOrStalled = True
 
-    log.info('Finished waiting for migration of "%s"'%(keyspace,))
+    log.info('Finished waiting for migration of "%s"' % (keyspace,))
     if migrationsFailedOrStalled:
-        log.warning('Detected failed migration of "%s", will re-request migration'%(keyspace,))
+        log.warning('Detected failed migration of "%s", ' % (keyspace,) +
+                    'will re-request migration')
         requestMigration(keyspace)
 
 
@@ -326,11 +352,13 @@ def requestMigration(keyspace):
         #   is in progress but hasn't been updated in more than 1 minute
         #   (something happened while it was updating), or if it is marked as
         #   "failed" (something else happened and the update was aborted).
-        if ( req.failed or ( not req.inprogress and req.reqtime < staleTime ) or
-             ( req.inprogress and req.lastupdate < staleTime ) ):
+
+        if (req.failed or (not req.inprogress and req.reqtime < staleTime) or
+                (req.inprogress and req.lastupdate < staleTime)):
+
             # Delete the "stale" request (cleanup task)
             try:
-                log.info('Found stale request %s, deleting'%(req.reqid,))
+                log.info('Found stale request %s, deleting' % (req.reqid,))
                 session.execute(deleteReqQuery, (req.reqid,))
             except:
                 pass
@@ -344,19 +372,22 @@ def requestMigration(keyspace):
         reqid = uuid.uuid4()
         t = datetime.datetime.now()
 
-        log.info('No outstanding migration requests, requesting migration with ID %s'%(reqid,))
+        log.info('No outstanding migration requests, ' +
+                 'requesting migration with ID %s' % (reqid,))
 
         # Nominate ourselves to run migration tasks
         requestMigrationQuery = CassandraCluster.getPreparedStatement("""
-            INSERT INTO schema_migration_requests (reqid, reqtime, inprogress, failed, lastupdate)
+            INSERT INTO schema_migration_requests (reqid, reqtime, inprogress,
+            failed, lastupdate)
             VALUES (?, ?, false, false, ?)
         """, keyspace=keyspace)
-        requestMigrationQuery.consistency_level=ConsistencyLevel.QUORUM
+        requestMigrationQuery.consistency_level = ConsistencyLevel.QUORUM
         session.execute(requestMigrationQuery, (reqid, t, t))
 
         time.sleep(2)
 
-        log.info('Checking migration requests table to see if we are selected for migration')
+        log.info('Checking migration requests table to see if we ' +
+                 'are selected for migration')
 
         # Check and see if we were selected
         migrationRequestsQuery = CassandraCluster.getPreparedStatement("""
@@ -367,19 +398,19 @@ def requestMigration(keyspace):
         # Sort by request time
         migrationRequests = sorted(migrationRequests, key=lambda x: x.reqtime)
 
-        if ( migrationRequests[0].reqid == reqid ):
+        if (migrationRequests[0].reqid == reqid):
             # We were selected (only request or first request)
 
             t = datetime.datetime.now()
 
             # Mark ourselves as "In Progress"
             markRequestInProgressQuery = CassandraCluster.getPreparedStatement(
-            """
-                UPDATE schema_migration_requests
-                SET inprogress = true,
-                lastupdate = ?
-                WHERE reqid = ?
-            """, keyspace=keyspace)
+                """
+                    UPDATE schema_migration_requests
+                    SET inprogress = true,
+                    lastupdate = ?
+                    WHERE reqid = ?
+                """, keyspace=keyspace)
             session.execute(markRequestInProgressQuery, (t, reqid))
 
             try:
@@ -402,7 +433,7 @@ def requestMigration(keyspace):
                     inprogress = false
                     WHERE reqid = ?
                 """, keyspace=keyspace)
-                session.execute(reqFailedQuery, (t,reqid))
+                session.execute(reqFailedQuery, (t, reqid))
 
                 raise e
         else:
@@ -419,18 +450,20 @@ def requestMigration(keyspace):
         # Wait for migration to complete
         waitForMigrationCompletion(keyspace)
 
+
 def setupKeyspace(keyspace):
     session = CassandraCluster.getSession()
 
     try:
-        log.info('Creating Keyspace "%s"'%(keyspace,))
+        log.info('Creating Keyspace "%s"' % (keyspace,))
         # Try to create keyspace, ignore if it already exists
         session.execute(SimpleStatement("""
-            CREATE KEYSPACE %s WITH replication
-                = {'class': '%s', 'replication_factor': %s};
-        """%(keyspace,'SimpleStrategy',1), consistency_level=ConsistencyLevel.QUORUM))
-    except cassandra.AlreadyExists as e:
-        log.info('Keyspace "%s" already exists (skipping)'%(keyspace,))
+                CREATE KEYSPACE %s WITH replication
+                    = {'class': '%s', 'replication_factor': %s};
+            """ % (keyspace, 'SimpleStrategy', 1),
+            consistency_level=ConsistencyLevel.QUORUM))
+    except cassandra.AlreadyExists:
+        log.info('Keyspace "%s" already exists (skipping)' % (keyspace,))
 
     session = CassandraCluster.getSession(keyspace)
 
@@ -450,7 +483,7 @@ def setupKeyspace(keyspace):
                     PRIMARY KEY (scriptname, time)
                     )
             """, consistency_level=ConsistencyLevel.QUORUM))
-        except Exception as e:
+        except Exception:
             log.info('Failed to create Schema Migrations table (Ignoring)')
 
     if not tableExists(keyspace, 'schema_migration_requests'):
@@ -469,8 +502,9 @@ def setupKeyspace(keyspace):
                     PRIMARY KEY (reqid)
                     )
             """, consistency_level=ConsistencyLevel.QUORUM))
-        except Exception as e:
-            log.info('Failed to create Schema Migration Requests table (Ignoring)')
+        except Exception:
+            log.info('Failed to create Schema Migration Requests ' +
+                     'table (Ignoring)')
 
     # Just to prevent race conditions on creation and read
     time.sleep(1)
