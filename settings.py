@@ -4,18 +4,25 @@ import os
 from logging import getLogger
 log = getLogger('gunicorn.error')
 
+
 class Settings:
     sysConfigFile = '/etc/authservicesapi.conf'
     loaded = False
 
     config = {
-            'cassandra': {
-                'cluster': 'AuthServices',
-                'nodes': [ '127.0.0.1' ],
-                'port': '9042',
-                'auth_keyspace': 'authdb'
-                }
-            }
+        'cassandra': {
+            'cluster': 'AuthServices',
+            'nodes': ['127.0.0.1'],
+            'port': '9042',
+            'auth_keyspace': 'authdb'
+        },
+        'defaultorg': {
+            'name': 'example.net',
+            'defaultadminuser': 'admin',
+            'defaultadminpass': 'admin',
+            'defaultadminemail': 'admin@example.net'
+        }
+    }
 
     def getConfig():
         if not Settings.loaded:
