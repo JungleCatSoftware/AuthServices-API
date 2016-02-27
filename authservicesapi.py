@@ -1,5 +1,5 @@
 import apis.users
-from database.cassandra import setupKeyspace
+from database.cassandra import setupKeyspace, setupDefaultOrg
 from flask import Flask
 from flask_restful import Api
 from logging import getLogger
@@ -10,6 +10,7 @@ log = getLogger('gunicorn.error')
 config = Settings.getConfig()
 
 setupKeyspace(config['cassandra']['auth_keyspace'])
+setupDefaultOrg()
 
 app = Flask(__name__)
 api = Api(app)
