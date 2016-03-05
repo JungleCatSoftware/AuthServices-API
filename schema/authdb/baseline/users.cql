@@ -4,5 +4,7 @@ CREATE TABLE users (
   email text,
   parentuser text,
   createdate timestamp,
+  salt text,
+  hash text,
   PRIMARY KEY (org, username)
 );
