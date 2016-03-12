@@ -1,8 +1,8 @@
-from database.cassandra import CassandraCluster
 from cassandra import ConsistencyLevel
 from flask_restful import Resource, reqparse
 from logging import getLogger
 from settings import Settings
+from database.authdb import AuthDB
 
 config = Settings.getConfig()
 log = getLogger('gunicorn.error')
@@ -21,44 +21,18 @@ class Users(Resource):
                             help='Parent user in form of user@org')
         args = parser.parse_args()
         try:
-            session = CassandraCluster.getSession(
-                config['cassandra']['auth_keyspace'])
-            checkUserExistsQuery = CassandraCluster.getPreparedStatement(
-                """
-                SELECT username, org FROM users
-                WHERE org = ?
-                AND username = ?
-                """, keyspace=session.keyspace)
-            results = session.execute(checkUserExistsQuery,
-                                      (args['org'], args['username'])
-                                      ).current_rows
-            if len(results) == 0:
-                checkOrgSetting = CassandraCluster.getPreparedStatement(
-                    """
-                    SELECT value FROM orgsettings
-                    WHERE org = ?
-                    AND setting = ?
-                    """, keyspace=session.keyspace)
-                results = session.execute(checkOrgSetting,
-                                          (args['org'], 'registrationOpen')
-                                          ).current_rows
-                if len(results) == 0 or results[0].value == 0:
+            if not AuthDB.userExists(args['org'], args['username']):
+                regOpen = AuthDB.getOrgSetting(args['org'],
+                                               'registrationOpen').current_rows
+                if len(regOpen) == 0 or regOpen[0].value == 0:
                     return {'Message':
                             'Cannot create user "%s@%s". Organization is ' %
                             (args['username'], args['org']) +
                             'closed for registrations or does not exist.'}, 400
                 else:
-                    createUserQuery = CassandraCluster.getPreparedStatement(
-                        """
-                        INSERT INTO users ( org, username, email, parentuser,
-                        createdate )
-                        VALUES ( ?, ?, ?, ?, dateof(now()) )
-                        """, keyspace=session.keyspace)
-                    createUserQuery.consistency_level = ConsistencyLevel.QUORUM
-                    session.execute(createUserQuery,
-                                    (args['org'], args['username'],
-                                     args['email'], args['parentuser'])
-                                    )
+                    AuthDB.createUser(args['org'], args['username'],
+                                      args['email'], args['parentuser'],
+                                      ConsistencyLevel.QUORUM)
             else:
                 return {'Message':
                         'Cannot create user "%s@%s", as it already exists.' %
@@ -77,16 +51,7 @@ class User(Resource):
         Retrieve basic user record information.
         """
         try:
-            session = CassandraCluster.getSession(
-                config['cassandra']['auth_keyspace'])
-            getUserQuery = CassandraCluster.getPreparedStatement(
-                """
-                SELECT username, org, parentuser, createdate FROM users
-                WHERE org = ?
-                AND username = ?
-                """, keyspace=session.keyspace)
-            results = session.execute(getUserQuery,
-                                      (org, username)).current_rows
+            results = AuthDB.getUser(org, username).current_rows
         except Exception as e:
             log.error('Exception on User/get: %s' % str(e))
             return {'ServerError': 500, 'Message':
