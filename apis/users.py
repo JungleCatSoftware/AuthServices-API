@@ -18,8 +18,16 @@ class Users(Resource):
         parser.add_argument('email', type=str, required=True,
                             help='Email address for user')
         parser.add_argument('parentuser', type=str, required=False,
-                            help='Parent user in form of user@org')
+                            help='Parent user in form of user@org',
+                            default=None)
         args = parser.parse_args()
+
+        parentusername, parentuserorg = '', ''
+        try:
+            parentusername, parentuserorg = args['parentuser'].split('@')
+        except:
+            pass
+
         try:
             if not AuthDB.userExists(args['org'], args['username']):
                 regOpen = AuthDB.getOrgSetting(args['org'],
@@ -29,6 +37,14 @@ class Users(Resource):
                             'Cannot create user "%s@%s". Organization is ' %
                             (args['username'], args['org']) +
                             'closed for registrations or does not exist.'}, 400
+                elif (args['parentuser'] is not None and
+                      (len(parentusername) == 0 or len(parentuserorg) == 0 or
+                       not AuthDB.userExists(parentuserorg, parentusername))):
+                    return {'Message':
+                            'Cannot create user "%s@%s". ' %
+                            (args['username'], args['org']) +
+                            'Parent user "%s" does not exist.' %
+                            (args['parentuser'],)}, 400
                 else:
                     AuthDB.createUser(args['org'], args['username'],
                                       args['email'], args['parentuser'],
