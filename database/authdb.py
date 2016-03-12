@@ -12,8 +12,7 @@ class AuthDB:
             @wraps(func)
             def func_wrapper(*args, **kwargs):
                 if AuthDB.session is None:
-                    AuthDB.session = CassandraCluster.\
-                        getSession(keyspace)
+                    AuthDB.session = CassandraCluster.getSession(keyspace)
                 return func(*args, **kwargs)
             return func_wrapper
         return sessionQueryWrapper
