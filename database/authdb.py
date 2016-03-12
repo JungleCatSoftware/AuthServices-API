@@ -1,36 +1,20 @@
 from cassandra import ConsistencyLevel
 from database.cassandra import CassandraCluster
-from functools import wraps
+from database.db import DB
 
 
-class AuthDB:
+class AuthDB(DB):
     """
     Class with static methods for interacting with the AuthDB using a singleton
     CassandraCluster Session object.
     """
 
     keyspace = 'authdb'
-    session = None
 
-    def sessionQuery(keyspace):
-        """
-        Wrapper to ensure session creation for each query
-
-        :keyspace:
-            Keyspace to use for session creation.
-        """
-        def sessionQueryWrapper(func):
-            @wraps(func)
-            def func_wrapper(*args, **kwargs):
-                if AuthDB.session is None:
-                    AuthDB.session = CassandraCluster.getSession(keyspace)
-                return func(*args, **kwargs)
-            return func_wrapper
-        return sessionQueryWrapper
-
-    @sessionQuery(keyspace)
+    @DB.sessionQuery(keyspace)
     def createUser(org, username, email, parentuser,
-                   consistency=ConsistencyLevel.LOCAL_QUORUM):
+                   consistency=ConsistencyLevel.LOCAL_QUORUM,
+                   session=None):
         """
         Create a user in the authdb.users table.
 
@@ -51,11 +35,11 @@ class AuthDB:
             VALUES ( ?, ?, ?, ?, dateof(now()) )
             """, keyspace=AuthDB.keyspace)
         createUserQuery.consistency_level = consistency
-        return AuthDB.session.execute(createUserQuery,
-                                      (org, username, email, parentuser))
+        return session.execute(createUserQuery,
+                               (org, username, email, parentuser))
 
-    @sessionQuery(keyspace)
-    def getOrgSetting(org, setting):
+    @DB.sessionQuery(keyspace)
+    def getOrgSetting(org, setting, session=None):
         """
         Get a setting/property for an organization from the authdb.orgsettings
         table.
@@ -71,10 +55,10 @@ class AuthDB:
             WHERE org = ?
             AND setting = ?
             """, keyspace=AuthDB.keyspace)
-        return AuthDB.session.execute(checkOrgSetting, (org, setting))
+        return session.execute(checkOrgSetting, (org, setting))
 
-    @sessionQuery(keyspace)
-    def getUser(org, username):
+    @DB.sessionQuery(keyspace)
+    def getUser(org, username, session=None):
         """
         Retrieve a user from the authdb.users table
 
@@ -89,7 +73,7 @@ class AuthDB:
             WHERE org = ?
             AND username = ?
             """, keyspace=AuthDB.keyspace)
-        return AuthDB.session.execute(getUserQuery, (org, username))
+        return session.execute(getUserQuery, (org, username))
 
     def userExists(org, username):
         """
