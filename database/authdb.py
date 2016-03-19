@@ -2,6 +2,7 @@ from cassandra import ConsistencyLevel
 from database.cassandra import CassandraCluster
 from database.db import DB
 from logging import getLogger
+from settings import Settings
 
 log = getLogger('gunicorn.error')
 
@@ -12,7 +13,8 @@ class AuthDB(DB):
     CassandraCluster Session object.
     """
 
-    keyspace = 'authdb'
+    config = Settings.getConfig()
+    keyspace = config['cassandra']['auth_keyspace']
 
     @DB.sessionQuery(keyspace)
     def createDefaultOrg(orgName, adminUser, adminEmail, session=None):
@@ -242,6 +244,10 @@ class AuthDB(DB):
         setOrgSettingQuery.consistency_level = consistency
         session.execute(setOrgSettingQuery,
                         (org, setting, value))
+
+    def setupDB(replication_class='SimpleStrategy', replication_factor=1):
+        DB.setupDB(AuthDB.keyspace, replication_class=replication_class,
+                   replication_factor=replication_factor)
 
     def userExists(org, username):
         """

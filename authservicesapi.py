@@ -1,5 +1,4 @@
 import apis.users
-from database.cassandra import setupKeyspace
 from database.authdb import AuthDB
 from flask import Flask
 from flask_restful import Api
@@ -12,7 +11,7 @@ config = Settings.getConfig()
 
 log.info("Initializing database.")
 
-setupKeyspace(config['cassandra']['auth_keyspace'])
+AuthDB.setupDB()
 AuthDB.createDefaultOrg(config['defaultorg']['name'],
                         config['defaultorg']['defaultadminuser'],
                         config['defaultorg']['defaultadminemail'])
