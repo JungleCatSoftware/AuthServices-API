@@ -10,16 +10,25 @@ log = getLogger('gunicorn.error')
 
 config = Settings.getConfig()
 
+log.info("Initializing database.")
+
 setupKeyspace(config['cassandra']['auth_keyspace'])
 AuthDB.createDefaultOrg(config['defaultorg']['name'],
                         config['defaultorg']['defaultadminuser'],
                         config['defaultorg']['defaultadminemail'])
 
+log.info("Database initialization complete.")
+log.info("Initializing Flask Application.")
+
 app = Flask(__name__)
 api = Api(app)
 
+log.info("Adding API resources.")
+
 api.add_resource(apis.users.Users, '/users')
 api.add_resource(apis.users.User, '/users/<string:username>@<string:org>')
+
+log.info("Application initialization complete and ready!")
 
 if __name__ == "__main__":
     app.run(debug=True)
