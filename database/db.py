@@ -9,13 +9,69 @@ from database.cassandra import CassandraCluster
 from functools import wraps
 from logging import getLogger
 
-# Temp imports:
-from database.cassandra import tableExists, baseline, migrateSchema
-
 log = getLogger('gunicorn.error')
 
 
+def schemaDir(scriptstype):
+    """
+    Wrapper for functions that execute CQL files to accept a directory
+    instead and pass the files contained in that directory to the original
+    function. Additionally calls updateReq() to ensure the lastupdate time
+    is updated for each file.
+    """
+
+    def schemaDir_decorator(func):
+        @wraps(func)
+        def func_wrapper(path, session, reqid):
+            if os.path.isdir(path):
+                log.info('Loading %s from "%s"' % (scriptstype, path))
+                contents = os.listdir(path)
+                contents.sort()
+                for f in contents:
+                    filepath = os.path.join(path, f)
+                    if os.path.isfile(filepath):
+                        if f.endswith('.cql'):
+                            func(filepath, session)
+                            DB.updateReq(session, reqid)
+                        else:
+                            log.info('Skipping non-CQL file "%s"' % (filepath,))
+                    else:
+                        log.info('Skipping non-file "%s"' % (filepath,))
+            else:
+                log.info('No %s found for "%s"' %
+                         (scriptstype, session.keyspace))
+        return func_wrapper
+    return schemaDir_decorator
+
+
 class DB:
+
+    @schemaDir('baselines')
+    def baseline(path, session):
+        """
+        Execute a baseline CQL file to create tables within a keyspace. File
+        must be named for the table it represents and will not be executed if
+        the table already exists.
+        """
+
+        filestart = path.rfind('/')+1
+        tablename = path[filestart:-4]
+        log.info('Checking table "%s"' % (tablename,))
+        if not DB.tableExists(session.keyspace, tablename):
+            log.info('Running baseline script for "%s"' % (tablename,))
+            query = open(path).read()
+            try:
+                session.execute(SimpleStatement(query,
+                                consistency_level=ConsistencyLevel.QUORUM))
+            except Exception as e:
+                if DB.tableExists(session.keyspace, tablename):
+                    # Somehow we got in this state that we shouldn't get in
+                    log.warning('Error creating table "%s": ' % (tablename,) +
+                                'Tried to create a table that already exists!')
+                else:
+                    raise e
+        else:
+            log.info('Table "%s" already exists (skipping)' % (tablename,))
 
     def createDB(keyspace, replication_class, replication_factor,
                  consistency=ConsistencyLevel.QUORUM):
@@ -37,28 +93,98 @@ class DB:
 
         # Only migrate if there is a directory for the keyspace schema
         if os.path.isdir(schemaroot):
-            baseline(os.path.join(schemaroot, 'baseline'),
-                     session.keyspace, reqid)
-            migrateSchema(os.path.join(schemaroot, 'schema_migrations'),
-                          session.keyspace, reqid)
+            DB.baseline(os.path.join(schemaroot, 'baseline'),
+                        session, reqid)
+            DB.migrateSchema(os.path.join(schemaroot, 'schema_migrations'),
+                             session, reqid)
         else:
             log.info('No schema directory found for "%s"' % (session.keyspace,))
 
-    def sessionQuery(keyspace):
+    @schemaDir('schema migrations')
+    def migrateSchema(path, session):
         """
-        Wrapper to ensure session creation for each query
+        Execute a CQL schema migration script within a keyspace. File will not
+        be run if it is marked as successfully run in the schema_migrations
+        table within the keyspace.
+        """
 
-        :keyspace:
-            Keyspace to use for session creation.
-        """
-        def sessionQueryWrapper(func):
-            @wraps(func)
-            def func_wrapper(*args, **kwargs):
-                return func(*args,
-                            session=CassandraCluster.getSession(keyspace),
-                            **kwargs)
-            return func_wrapper
-        return sessionQueryWrapper
+        # Get the filename part
+        filestart = path.rfind('/')+1
+        filename = path[filestart:]
+
+        log.info('Checking migration script "%s"' % (filename,))
+
+        # Get the migration history for the script
+        migrationScriptHistoryQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT * FROM schema_migrations
+            WHERE scriptname = ?;
+            """, keyspace=session.keyspace)
+        migrationScriptHistory = session.execute(migrationScriptHistoryQuery,
+                                                 (filename,)).current_rows
+
+        # Run if there is no history or the last execution failed
+        if (len(migrationScriptHistory) == 0 or
+                migrationScriptHistory[-1].failed or
+                not migrationScriptHistory[-1].run):
+
+            log.info('Running "%s" as it has not been run sucessfully' %
+                     (filename,))
+
+            content = open(path).read()
+            exectime = datetime.datetime.now()
+
+            # Insert a record of this script into the schema_migrations table
+            #   and mark as not run and not failed.
+            migrationScriptRunInsert = CassandraCluster.getPreparedStatement(
+                """
+                INSERT INTO schema_migrations (scriptname, time, run, failed,
+                    error, content)
+                    VALUES (?, ?, false, false, '', ?)
+                """, keyspace=session.keyspace)
+            migrationScriptRunInsert.consistency_level = ConsistencyLevel.QUORUM
+            session.execute(migrationScriptRunInsert,
+                            (filename, exectime, content))
+
+            try:
+                # Run the migration script
+                session.execute(SimpleStatement(content,
+                                consistency_level=ConsistencyLevel.QUORUM))
+
+                log.info('Successfully ran "%s"' % (filename,))
+
+                # Update the script's run record as completed with success
+                migrationScriptUpdateSuccess = \
+                    CassandraCluster.getPreparedStatement("""
+                        UPDATE schema_migrations
+                        SET run = true, failed = false
+                        WHERE scriptname = ? AND time = ?
+                    """, keyspace=session.keyspace)
+                migrationScriptUpdateSuccess.consistency_level = \
+                    ConsistencyLevel.QUORUM
+                session.execute(migrationScriptUpdateSuccess,
+                                (filename, exectime))
+            except Exception as e:
+                log.info('Failed to run "%s"' % (filename,))
+
+                # Log failure
+                migrationScriptUpdateFailure = \
+                    CassandraCluster.getPreparedStatement(
+                        """
+                        UPDATE schema_migrations
+                        SET run = false, failed = true, error = ?
+                        WHERE scriptname = ? AND time = ?
+                        """, keyspace=session.keyspace)
+                migrationScriptUpdateFailure.consistency_level = \
+                    ConsistencyLevel.QUORUM
+                session.execute(migrationScriptUpdateFailure,
+                                (str(e), filename, exectime))
+
+                # Pass failure upwards
+                raise e
+        else:
+            log.info('Script "%s" has already been run on %s' %
+                     (filename, migrationScriptHistory[-1].time))
 
     def requestMigration(session=None):
         """
@@ -199,6 +325,22 @@ class DB:
             # Wait for migration to complete
             DB.waitForMigrationCompletion(session)
 
+    def sessionQuery(keyspace):
+        """
+        Wrapper to ensure session creation for each query
+
+        :keyspace:
+            Keyspace to use for session creation.
+        """
+        def sessionQueryWrapper(func):
+            @wraps(func)
+            def func_wrapper(*args, **kwargs):
+                return func(*args,
+                            session=CassandraCluster.getSession(keyspace),
+                            **kwargs)
+            return func_wrapper
+        return sessionQueryWrapper
+
     def setupDB(keyspace, replication_class='SimpleStrategy',
                 replication_factor=1):
         try:
@@ -208,7 +350,7 @@ class DB:
 
         session = CassandraCluster.getSession(keyspace)
 
-        if not tableExists(keyspace, 'schema_migrations'):
+        if not DB.tableExists(session.keyspace, 'schema_migrations'):
             # Create the schema_migrations table. This table stores the history
             #   of schema update scripts that have been run against the
             #   keyspace.
@@ -226,10 +368,11 @@ class DB:
                         PRIMARY KEY (scriptname, time)
                         )
                     """, consistency_level=ConsistencyLevel.QUORUM))
-            except Exception:
+            except Exception as e:
                 log.info('Failed to create Schema Migrations table (Ignoring)')
+                log.debug(str(e))
 
-        if not tableExists(keyspace, 'schema_migration_requests'):
+        if not DB.tableExists(session.keyspace, 'schema_migration_requests'):
             # Create schema_migration_requests table. This table is used to
             #   manage and coordinate multiple nodes requesting schema
             #   update/migrations in order to ensure only one attempts to alter
@@ -247,15 +390,59 @@ class DB:
                         PRIMARY KEY (reqid)
                         )
                     """, consistency_level=ConsistencyLevel.QUORUM))
-            except Exception:
+            except Exception as e:
                 log.info('Failed to create Schema Migration Requests ' +
                          'table (Ignoring)')
+                log.debug(str(e))
 
         # Just to prevent race conditions on creation and read
         time.sleep(1)
 
         # Request migration tasks
         DB.requestMigration(session)
+
+    def tableExists(keyspace, table):
+        """
+        Determine if the given table exists in the keyspace
+
+        :keyspace:
+            The keyspace to check for the table
+        :table:
+            Table to check for
+        """
+        if keyspace is None or table is None:
+            return False
+
+        session = CassandraCluster.getSession('system')
+
+        lookuptable = CassandraCluster.getPreparedStatement("""
+            SELECT columnfamily_name FROM schema_columnfamilies
+                WHERE keyspace_name=? and columnfamily_name=?
+        """, keyspace=session.keyspace)
+        table_count = len(session.execute(lookuptable,
+                                          (keyspace, table))
+                          .current_rows)
+
+        return table_count == 1
+
+    def updateReq(session, reqid):
+        """
+        Update the lastupdate time on a reqid
+
+        :keyspace:
+            Keyspace the reqid applies to
+        :reqid:
+            ID of the request to be updated
+        """
+
+        t = datetime.datetime.now()
+        reqUpdateQuery = CassandraCluster.getPreparedStatement(
+            """
+            UPDATE schema_migration_requests
+            SET lastupdate = ?
+            WHERE reqid = ?
+            """, keyspace=session.keyspace)
+        session.execute(reqUpdateQuery, (t, reqid))
 
     def waitForMigrationCompletion(session):
         """
