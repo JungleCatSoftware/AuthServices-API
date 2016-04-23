@@ -26,8 +26,8 @@ log.info("Adding API resources.")
 
 api.add_resource(apis.users.Users, '/users')
 api.add_resource(apis.users.User, '/users/<string:username>@<string:org>')
-api.add_resource(apis.users.PasswordReset,
-                 '/users/<string:username>@<string:org>/resetpassword')
+api.add_resource(apis.users.RequestPasswordReset,
+                 '/users/<string:username>@<string:org>/requestpasswordreset')
 
 log.info("Application initialization complete and ready!")
 

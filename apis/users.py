@@ -91,12 +91,11 @@ class User(Resource):
                     'Request returned too many results'}, 400
 
 
-class PasswordReset(Resource):
+class RequestPasswordReset(Resource):
     def post(self, username, org):
         try:
             if AuthDB.userExists(org, username):
                 resetid = AuthDB.createPasswordReset(org, username)
-                log.error('RESETID: %s' % (resetid,))
                 if resetid:
                     # TODO: Email ResetID
                     return {'Message':
