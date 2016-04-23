@@ -28,6 +28,8 @@ api.add_resource(apis.users.Users, '/users')
 api.add_resource(apis.users.User, '/users/<string:username>@<string:org>')
 api.add_resource(apis.users.RequestPasswordReset,
                  '/users/<string:username>@<string:org>/requestpasswordreset')
+api.add_resource(apis.users.CompletePasswordReset,
+                 '/users/<string:username>@<string:org>/completepasswordreset')
 
 log.info("Application initialization complete and ready!")
 

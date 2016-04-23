@@ -1,3 +1,5 @@
+import argon2
+import binascii
 from cassandra import ConsistencyLevel
 from flask_restful import Resource, reqparse
 from logging import getLogger
@@ -113,3 +115,27 @@ class RequestPasswordReset(Resource):
             log.error('Exception in PasswordReset.Post: %s' % (e,))
             return {'ServerError': 500, 'Message':
                     'There was an error fulfiling your request'}, 500
+
+
+class CompletePasswordReset(Resource):
+    def post(self, username, org):
+        parser = reqparse.RequestParser()
+        parser.add_argument('resetid', type=str, required=True,
+                            help='ResetID of the reset request')
+        parser.add_argument('password', type=str, required=True,
+                            help='New password equivelent created from the ' +
+                            'output of the pbkdf2 function salted with ' +
+                            '"username@org" and a count of 100000')
+        args = parser.parse_args()
+
+        if AuthDB.userExists(org, username):
+            try:
+                newpass = binascii.hexlify(
+                    argon2.argon2_hash(args['password'],
+                                       "asdfhkjhfasdklhfdsklj",
+                                       t=5)).decode()
+            except Exception as e:
+                return {'message': 'ERROR %s' % (e,)}, 500
+            return {'message': 'PASSWORD %s' % (newpass,)}, 200
+        else:
+            pass
