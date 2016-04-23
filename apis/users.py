@@ -89,3 +89,28 @@ class User(Resource):
         else:
             return {'RequestError': 400, 'Message':
                     'Request returned too many results'}, 400
+
+
+class PasswordReset(Resource):
+    def post(self, username, org):
+        try:
+            if AuthDB.userExists(org, username):
+                resetid = AuthDB.createPasswordReset(org, username)
+                log.error('RESETID: %s' % (resetid,))
+                if resetid:
+                    # TODO: Email ResetID
+                    return {'Message':
+                            'Password reset for "%s"@"%s"'
+                            % (username, org)}, 200
+                else:
+                    return {'Message':
+                            'Unable to reset password for "%s"@"%s"'
+                            % (username, org)}, 500
+            else:
+                return {'Message':
+                        'Cannot reset password for invalid user "%s"@"%s"'
+                        % (username, org)}, 400
+        except Exception as e:
+            log.error('Exception in PasswordReset.Post: %s' % (e,))
+            return {'ServerError': 500, 'Message':
+                    'There was an error fulfiling your request'}, 500

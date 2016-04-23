@@ -1,3 +1,4 @@
+import uuid
 from cassandra import ConsistencyLevel
 from database.cassandra import CassandraCluster
 from database.db import DB
@@ -101,6 +102,37 @@ class AuthDB(DB):
             """, keyspace=session.keyspace)
         createOrgQuery.consistency_level = consistency
         session.execute(createOrgQuery, (org,))
+
+    @DB.sessionQuery(keyspace)
+    def createPasswordReset(org, username,
+                            consistency=ConsistencyLevel.LOCAL_QUORUM,
+                            session=None):
+        """
+        Create a password reset in authdb.userpasswordresets table.
+
+        :org:
+            Name of organization
+        :username:
+            Name of user
+        """
+        createPasswordResetQuery = CassandraCluster.getPreparedStatement(
+            """
+            INSERT INTO userpasswordresets ( org, username, requestdate,
+                                             resetid )
+            VALUES ( ?, ?, dateof(now()), ? )
+            """, keyspace=session.keyspace)
+        createPasswordResetQuery.consistency_level = consistency
+
+        resetid = uuid.uuid4()
+
+        try:
+            session.execute(createPasswordResetQuery,
+                            (org, username, resetid))
+            return resetid
+        except Exception as e:
+            log.error("Caught exception in AuthDB.createPasswordReset: %s"
+                      % (e,))
+            return False
 
     @DB.sessionQuery(keyspace)
     def createUser(org, username, email, parentuser,
