@@ -2,6 +2,7 @@ import uuid
 from cassandra import ConsistencyLevel
 from database.cassandra import CassandraCluster
 from database.db import DB
+from datetime import datetime, timedelta
 from logging import getLogger
 from settings import Settings
 
@@ -162,6 +163,30 @@ class AuthDB(DB):
                                (org, username, email, parentuser))
 
     @DB.sessionQuery(keyspace)
+    def deletePasswordReset(org, username,
+                            consistency=ConsistencyLevel.LOCAL_QUORUM,
+                            session=None):
+        """
+        Delete/remove a password reset request for a user
+
+        :org:
+            Name of organization the user belongs to
+        :username:
+            Name of user
+        :consistency:
+            Cassandra ConsistencyLevel (default LOCAL_QUORUM)
+        """
+        deletePasswordResetQuery = CassandraCluster.getPreparedStatement(
+            """
+            DELETE FROM userpasswordresets
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        deletePasswordResetQuery.consistency_level = consistency
+        session.execute(deletePasswordResetQuery,
+                        (org, username))
+
+    @DB.sessionQuery(keyspace)
     def getGlobalSetting(setting, session=None):
         """
         Get a setting/property for system from the authdb.globalsettings
@@ -211,6 +236,25 @@ class AuthDB(DB):
             AND setting = ?
             """, keyspace=session.keyspace)
         return session.execute(checkOrgSetting, (org, setting))
+
+    @DB.sessionQuery(keyspace)
+    def getPasswordReset(org, username, session=None):
+        """
+        Retrieve a password reset request from the authdb.userpasswordresets
+        table
+
+        :org:
+            Name of organization the user belongs to
+        :username:
+            Name of the user
+        """
+        getPasswordResetQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT username, org, requestdate, resetid FROM userpasswordresets
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        return session.execute(getPasswordResetQuery, (org, username))
 
     @DB.sessionQuery(keyspace)
     def getUser(org, username, session=None):
@@ -277,6 +321,35 @@ class AuthDB(DB):
         session.execute(setOrgSettingQuery,
                         (org, setting, value))
 
+    @DB.sessionQuery(keyspace)
+    def setPassword(org, username, passwordHash, salt,
+                    consistency=ConsistencyLevel.LOCAL_QUORUM,
+                    session=None):
+        """
+        Update/set user's password with given hash and salt
+
+        :org:
+            Name of org the user is in
+        :username:
+            Name of user
+        :passwordHash:
+            The Argon2 hash of the salted password
+        :salt:
+            Salt used to generate the hash
+        :consistency:
+            Cassandra consistency level. Defaults to LOCAL_QUORUM.
+        """
+        setPasswordQuery = CassandraCluster.getPreparedStatement(
+            """
+            UPDATE users SET
+            hash = ?,
+            salt = ?
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        setPasswordQuery.consistency_level = consistency
+        session.execute(setPasswordQuery, (passwordHash, salt, org, username))
+
     def setupDB(replication_class='SimpleStrategy', replication_factor=1):
         DB.setupDB(AuthDB.keyspace, replication_class=replication_class,
                    replication_factor=replication_factor)
@@ -292,3 +365,25 @@ class AuthDB(DB):
             Name of the user
         """
         return len(AuthDB.getUser(org, username).current_rows) > 0
+
+    def validatePasswordReset(org, username, resetid):
+        """
+        Verify a password reset UUID against the record for that user. Returns
+        True if the UUID matches the user's record and the record's date is less
+        than 7 days old, returns False otherwise.
+
+        :org:
+            Organization of the user to check
+        :username:
+            Name of the user to check
+        :resetid:
+            UUID of the password reset to check
+        """
+        resetRecord = AuthDB.getPasswordReset(org, username)
+        if (len(resetRecord.current_rows) > 0 and
+                (resetRecord[0].requestdate + timedelta(days=7)) >
+                datetime.now() and
+                str(resetRecord[0].resetid) == resetid):
+            return True
+        else:
+            return False

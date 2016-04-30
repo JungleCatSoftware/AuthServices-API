@@ -3,6 +3,7 @@ import binascii
 from cassandra import ConsistencyLevel
 from flask_restful import Resource, reqparse
 from logging import getLogger
+from random import SystemRandom
 from settings import Settings
 from database.authdb import AuthDB
 
@@ -129,13 +130,30 @@ class CompletePasswordReset(Resource):
         args = parser.parse_args()
 
         if AuthDB.userExists(org, username):
-            try:
-                newpass = binascii.hexlify(
-                    argon2.argon2_hash(args['password'],
-                                       "asdfhkjhfasdklhfdsklj",
-                                       t=5)).decode()
-            except Exception as e:
-                return {'message': 'ERROR %s' % (e,)}, 500
-            return {'message': 'PASSWORD %s' % (newpass,)}, 200
+            if AuthDB.validatePasswordReset(org, username, args['resetid']):
+                try:
+                    sysrand = SystemRandom()
+                    salt = ''.join(chr(sysrand.randint(32, 126))
+                                   for i in range(sysrand.randint(50, 60)))
+                    passwordHash = binascii.hexlify(
+                        argon2.argon2_hash(args['password'],
+                                           salt,
+                                           t=5)).decode()
+                    AuthDB.setPassword(org, username, passwordHash, salt)
+                except Exception as e:
+                    log.error('Exeption in CompletePasswordReset Post: %s'
+                              % (e,))
+                    return {'message':
+                            'Error changing password for "%s"@"%s"'
+                            % (username, org)}, 500
+                finally:
+                    AuthDB.deletePasswordReset(org, username)
+                return {'message': 'Password updated for "%s"@"%s".'
+                        % (username, org)}, 200
+            else:
+                return {'message': 'Cannot change password for "%s"@"%s". '
+                        % (username, org) + 'Invalid or expired resetid'}, 400
         else:
-            pass
+            return {'message':
+                    'Cannot change password for invalid user "%s"@"%s"'
+                    % (username, org)}, 400
