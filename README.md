@@ -19,7 +19,7 @@ Create a new user.
  - 400: User was not created. User may already exist, Org may be closed or non-existent. See message for specific details
  - 500: Something unexpected happened. The user may not have been created.
 
-### /users/<user>@<org>
+### /users/\<user\>@\<org\>
 #### GET
 Retrieve basic user information.
 
@@ -32,7 +32,7 @@ None.
  - 404: No user matching the request could be found.
  - 500: The request resulted in an error and could not be completed.
 
-### /users/<user>@<org>/requestpasswordreset
+### /users/\<user\>@\<org\>/requestpasswordreset
 #### POST
 Request a password reset for a user.
 
@@ -44,7 +44,7 @@ None.
  - 400: No such user exists. No reset request was generated.
  - 500: An error occured creating the reset request.
 
-### /users/<user>@<org>/completepasswordreset
+### /users/\<user\>@\<org\>/completepasswordreset
 #### POST
 Complete a password reset for a user from a previous request.
 
