@@ -3,5 +3,5 @@ CREATE TABLE userpasswordresets (
   org text,
   resetid uuid,
   requestdate timestamp,
-  PRIMARY KEY (org, username)
+  PRIMARY KEY ((username,org))
 );
