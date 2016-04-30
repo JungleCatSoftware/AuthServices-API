@@ -4,6 +4,18 @@ Code for the AuthServices API back-end
 ## Endpoints
 Documentation for the HTTP API endpoints of the service.
 
+### /sessions/\<user\>@\<org\>
+#### POST
+Open session for a user
+
+##### Parameters
+ - password: A PBKDF2 hash of the new password using "username@org" as the salt and a count of 10,000
+
+##### Returns
+ - 200: Password was correct (WIP: Return session key)
+ - 400: Incorrect password
+ - 404: Invalid user
+
 ### /users
 #### POST
 Create a new user.
