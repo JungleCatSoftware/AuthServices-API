@@ -1,9 +1,7 @@
-import argon2
-import binascii
+import passwordutils
 from cassandra import ConsistencyLevel
 from flask_restful import Resource, reqparse
 from logging import getLogger
-from random import SystemRandom
 from settings import Settings
 from database.authdb import AuthDB
 
@@ -132,13 +130,10 @@ class CompletePasswordReset(Resource):
         if AuthDB.userExists(org, username):
             if AuthDB.validatePasswordReset(org, username, args['resetid']):
                 try:
-                    sysrand = SystemRandom()
-                    salt = ''.join(chr(sysrand.randint(32, 126))
-                                   for i in range(sysrand.randint(50, 60)))
-                    passwordHash = binascii.hexlify(
-                        argon2.argon2_hash(args['password'],
-                                           salt,
-                                           t=5)).decode()
+                    salt = passwordutils.generateSalt()
+                    passwordHash = passwordutils.hashPassword(
+                        args['password'], salt, algo='argon2',
+                        params={'t': 5})
                     AuthDB.setPassword(org, username, passwordHash, salt)
                 except Exception as e:
                     log.error('Exeption in CompletePasswordReset Post: %s'

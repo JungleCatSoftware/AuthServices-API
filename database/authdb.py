@@ -1,3 +1,4 @@
+import passwordutils
 import uuid
 from cassandra import ConsistencyLevel
 from database.cassandra import CassandraCluster
@@ -275,6 +276,50 @@ class AuthDB(DB):
         return session.execute(getUserQuery, (org, username))
 
     @DB.sessionQuery(keyspace)
+    def getUserHash(org, username, session=None):
+        """
+        Retrieve a user's password hash from the authdb.users table
+
+        :org:
+            Name of organization the user belongs to
+        :username:
+            Name of the user
+        """
+        getUserHashQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT hash FROM users
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        res = session.execute(getUserHashQuery, (org, username)).current_rows
+        if len(res) > 0:
+            return res[0].hash
+        else:
+            return None
+
+    @DB.sessionQuery(keyspace)
+    def getUserSalt(org, username, session=None):
+        """
+        Retrieve a user's salt from the authdb.users table
+
+        :org:
+            Name of organization the user belongs to
+        :username:
+            Name of the user
+        """
+        getUserSaltQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT salt FROM users
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        res = session.execute(getUserSaltQuery, (org, username)).current_rows
+        if len(res) > 0:
+            return res[0].salt
+        else:
+            return None
+
+    @DB.sessionQuery(keyspace)
     def setGlobalSetting(setting, value,
                          consistency=ConsistencyLevel.LOCAL_QUORUM,
                          session=None):
@@ -365,6 +410,26 @@ class AuthDB(DB):
             Name of the user
         """
         return len(AuthDB.getUser(org, username).current_rows) > 0
+
+    def validatePassword(org, username, password):
+        """
+        Compare the given password against the hashed version for the user
+
+        :org:
+            Organization of the user to check
+        :username:
+            Name of the user to check
+        :password:
+            Raw password of the user, without salt
+        """
+        salt = AuthDB.getUserSalt(org, username)
+        if salt is not None:
+            computedHash = passwordutils.hashPassword(
+                password, salt, algo='argon2', params={'t': 5})
+            storedHash = AuthDB.getUserHash(org, username)
+            if computedHash == storedHash:
+                return True
+        return False
 
     def validatePasswordReset(org, username, resetid):
         """

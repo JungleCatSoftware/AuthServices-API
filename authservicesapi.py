@@ -1,3 +1,4 @@
+import apis.sessions
 import apis.users
 from database.authdb import AuthDB
 from flask import Flask
@@ -30,6 +31,9 @@ api.add_resource(apis.users.RequestPasswordReset,
                  '/users/<string:username>@<string:org>/requestpasswordreset')
 api.add_resource(apis.users.CompletePasswordReset,
                  '/users/<string:username>@<string:org>/completepasswordreset')
+
+api.add_resource(apis.sessions.Sessions,
+                 '/sessions/<string:username>@<string:org>')
 
 log.info("Application initialization complete and ready!")
 
