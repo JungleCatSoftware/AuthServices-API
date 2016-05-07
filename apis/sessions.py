@@ -1,8 +1,7 @@
-from cassandra import ConsistencyLevel
+from database.authdb import AuthDB
 from flask_restful import Resource, reqparse
 from logging import getLogger
 from settings import Settings
-from database.authdb import AuthDB
 
 config = Settings.getConfig()
 log = getLogger('gunicorn.error')
@@ -21,6 +20,10 @@ class Sessions(Resource):
 
         if AuthDB.userExists(org, username):
             if AuthDB.validatePassword(org, username, args['password']):
+                # create UUID
+                # Create UserSession entry
+                # create key
+                # Create UserSessionKey entry
                 return {'message': 'TEMP: VALIDATED'}
             else:
                 return {'message':
