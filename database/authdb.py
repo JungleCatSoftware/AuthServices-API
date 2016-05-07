@@ -384,6 +384,67 @@ class AuthDB(DB):
             return None
 
     @DB.sessionQuery(keyspace)
+    def getUserSession(org, username, sessionId, session=None):
+        """
+        Get Session record
+
+        :org:
+            Name of user's organization
+        :username:
+            Name of user
+        :sessionId:
+            ID of session to lookup
+        """
+        getUserSessionQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT * FROM usersessions
+            WHERE org = ?
+            AND username = ?
+            AND sessionid = ?
+            """, keyspace=session.keyspace)
+        res = session.execute(getUserSessionQuery, (org, username, sessionId))\
+            .current_rows
+        if len(res) > 0:
+            return res[0]
+        else:
+            return None
+
+    @DB.sessionQuery(keyspace)
+    def getUserSessionByKey(sessionKey, session=None):
+        """
+        Get session record using a session key
+
+        :sessionKey:
+            64-character session key for the session
+        """
+        getUserSessionByKeyQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT sessionid, username, org FROM usersessionkeys
+            WHERE sessionkey = ?
+            """, keyspace=session.keyspace)
+        res = session.execute(getUserSessionByKeyQuery, (sessionKey,))\
+            .current_rows
+        numRows = len(res)
+        if numRows == 1:
+            return AuthDB.getUserSession(res[0].org, res[0].username,
+                                         res[0].sessionid)
+        elif numRows == 0:
+            return None
+        elif numRows > 1:
+            raise ValueError('Multiple sessions returned by key')
+
+    @DB.sessionQuery(keyspace)
+    def getUserSessions(org, username, session=None):
+        getUserSessionQuery = CassandraCluster.getPreparedStatement(
+            """
+            SELECT * FROM usersessions
+            WHERE org = ?
+            AND username = ?
+            """, keyspace=session.keyspace)
+        return session.execute(getUserSessionQuery,
+                               (org, username)).current_rows
+
+    @DB.sessionQuery(keyspace)
     def setGlobalSetting(setting, value,
                          consistency=ConsistencyLevel.LOCAL_QUORUM,
                          session=None):
@@ -516,3 +577,30 @@ class AuthDB(DB):
             return True
         else:
             return False
+
+    def validateSessionKey(sessionKey):
+        """
+        Verify a session key and grab the user
+
+        :sessionKey:
+            Key to validate
+        """
+        valid = False
+        username = None
+        org = None
+        try:
+            userSessionRecord = AuthDB.getUserSessionByKey(sessionKey)
+            if userSessionRecord is not None:
+                username = userSessionRecord.username
+                org = userSessionRecord.org
+                now = datetime.now()
+                if (userSessionRecord.lastupdate >
+                        now - timedelta(days=2) and
+                        userSessionRecord.startdate >
+                        now - timedelta(days=31)):
+                    valid = True
+        except ValueError as ve:
+            log.error('Error validating session: %s' % (ve,))
+        except Exception as e:
+            log.critical('Error in AuthDB.validateSession: %s' % (e,))
+        return (valid, username, org)

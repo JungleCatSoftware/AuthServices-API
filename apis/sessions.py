@@ -8,6 +8,41 @@ log = getLogger('gunicorn.error')
 
 
 class Sessions(Resource):
+    def get(self, username, org):
+        """
+        List user's sessions
+        """
+        parser = reqparse.RequestParser()
+        parser.add_argument('key', type=str, required=True,
+                            help='Valid session key',
+                            location=['headers', 'args'])
+        args = parser.parse_args()
+
+        sessionValid, sessionUser, sessionOrg = \
+            AuthDB.validateSessionKey(args['key'])
+
+        try:
+            if sessionValid:
+                if username == sessionUser and org == sessionOrg:
+                    sessions = AuthDB.getUserSessions(org, username)
+                    response = {'message': 'Found %d sessions for %s@%s' %
+                                (len(sessions), username, org)}
+                    response['sessions'] = list()
+                    for session in sessions:
+                        response['sessions'].append(
+                            {'sessionid': str(session.sessionid),
+                             'startdate': str(session.startdate),
+                             'lastupdate': str(session.lastupdate)})
+                    return response, 200
+                else:
+                    return {'message':
+                            'You are not authorized to view this resource'}, 403
+            else:
+                return {'message': 'Key expired or invalid'}, 401
+
+        except Exception as e:
+            log.critical('Error in Sessions.get: %s' % (e,))
+
     def post(self, username, org):
         """
         Create a session for the user.

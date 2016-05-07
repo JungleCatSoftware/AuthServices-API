@@ -1,7 +1,7 @@
 CREATE TABLE usersessionkeys (
   sessionkey text,
+  sessionid uuid,
   username text,
   org text,
-  sessionid uuid,
-  PRIMARY KEY (sessionkey)
+  PRIMARY KEY (sessionkey, sessionid, username, org)
 );
