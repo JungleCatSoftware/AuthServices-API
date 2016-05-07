@@ -5,6 +5,21 @@ Code for the AuthServices API back-end
 Documentation for the HTTP API endpoints of the service.
 
 ### /sessions/\<user\>@\<org\>
+#### GET
+View user's sessions. Requires being logged in as the requested user.
+
+##### Parameters
+ - key: Valid session key
+
+##### Returns
+ - 200: List of sessions containing:
+    - sessionid: ID of the session
+    - startdate: Date the session was first opened
+    - lastupdate: Date of the last time the session was refreshed
+ - 400: Request missing arguments. See message for more info.
+ - 401: Invalid key or key expired.
+ - 403: Key valid, but user associated with the key is not allowed to access this resource.
+
 #### POST
 Open session for a user
 
@@ -12,7 +27,9 @@ Open session for a user
  - password: A PBKDF2 hash of the new password using "username@org" as the salt and a count of 10,000
 
 ##### Returns
- - 200: Password was correct (WIP: Return session key)
+ - 200: Password valid
+    - id: Session's Id
+    - key: Session's key
  - 400: Incorrect password
  - 404: Invalid user
 
