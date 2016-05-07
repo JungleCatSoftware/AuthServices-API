@@ -44,18 +44,6 @@ None.
  - 404: No user matching the request could be found.
  - 500: The request resulted in an error and could not be completed.
 
-### /users/\<user\>@\<org\>/requestpasswordreset
-#### POST
-Request a password reset for a user.
-
-##### Parameters
-None.
-
-##### Returns
- - 200: Password reset was successfully generated for the user.
- - 400: No such user exists. No reset request was generated.
- - 500: An error occured creating the reset request.
-
 ### /users/\<user\>@\<org\>/completepasswordreset
 #### POST
 Complete a password reset for a user from a previous request.
@@ -69,3 +57,15 @@ Complete a password reset for a user from a previous request.
  - 400: The request is invalid. See message for specific details.
  - 500: An error occurred whie processing the request.
 
+
+### /users/\<user\>@\<org\>/requestpasswordreset
+#### POST
+Request a password reset for a user.
+
+##### Parameters
+None.
+
+##### Returns
+ - 200: Password reset was successfully generated for the user.
+ - 400: No such user exists. No reset request was generated.
+ - 500: An error occured creating the reset request.
