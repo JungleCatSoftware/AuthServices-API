@@ -18,18 +18,25 @@ class Sessions(Resource):
                             '"user@org" as the salt and count=10000')
         args = parser.parse_args()
 
-        if AuthDB.userExists(org, username):
-            if AuthDB.validatePassword(org, username, args['password']):
-                # create UUID
-                # Create UserSession entry
-                # create key
-                # Create UserSessionKey entry
-                return {'message': 'TEMP: VALIDATED'}
+        try:
+            if AuthDB.userExists(org, username):
+                if AuthDB.validatePassword(org, username, args['password']):
+                    sessionId = AuthDB.createUserSession(org, username)
+                    sessionKey = AuthDB.createUserSessionKey(org, username,
+                                                             sessionId)
+                    if sessionId and sessionKey:
+                        return {'message': 'Session created',
+                                'id': str(sessionId),
+                                'key': sessionKey}
+                    else:
+                        return {'message': 'Failed to open session'}, 500
+                else:
+                    return {'message':
+                            'Password authentication failed for "%s@%s".'
+                            % (username, org)}, 400
             else:
                 return {'message':
-                        'Password authentication failed for "%s@%s".'
-                        % (username, org)}, 400
-        else:
-            return {'message':
-                    'Cannot open session for invalid user "%s@%s".'
-                    % (username, org)}, 404
+                        'Cannot open session for invalid user "%s@%s".'
+                        % (username, org)}, 404
+        except Exception as e:
+            log.critical("Error in Sessions.post: %s" % (e,))

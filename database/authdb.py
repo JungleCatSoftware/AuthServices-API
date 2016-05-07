@@ -5,6 +5,7 @@ from database.cassandra import CassandraCluster
 from database.db import DB
 from datetime import datetime, timedelta
 from logging import getLogger
+from random import SystemRandom
 from settings import Settings
 
 log = getLogger('gunicorn.error')
@@ -162,6 +163,69 @@ class AuthDB(DB):
         createUserQuery.consistency_level = consistency
         return session.execute(createUserQuery,
                                (org, username, email, parentuser))
+
+    @DB.sessionQuery(keyspace)
+    def createUserSession(org, username,
+                          consistency=ConsistencyLevel.LOCAL_QUORUM,
+                          session=None):
+        """
+        Create a session record in the usersessions table for the given user
+
+        :org:
+            Name of organization for the user
+        :username:
+            Name of the user
+        """
+        sessionId = uuid.uuid4()
+        try:
+            createUserSessionQuery = CassandraCluster.getPreparedStatement(
+                """
+                INSERT INTO usersessions ( org, username, sessionid, startdate,
+                    lastupdate )
+                VALUES ( ?, ?, ?, dateof(now()), dateof(now()) )
+                """, keyspace=session.keyspace)
+            createUserSessionQuery.consistency_level = consistency
+            session.execute(createUserSessionQuery,
+                            (org, username, sessionId))
+            return sessionId
+        except Exception as e:
+            log.critical("Exception in AuthDB.createUserSession: %s" % (e,))
+
+    @DB.sessionQuery(keyspace)
+    def createUserSessionKey(org, username, sessionId,
+                             consistency=ConsistencyLevel.LOCAL_QUORUM,
+                             session=None):
+        """
+        Create a session key record in the usersessionkeys table for the given
+        user session
+
+        :org:
+            Name of organization for the user
+        :username:
+            Name of the user
+        :sessionid:
+            ID of the session to create a key for
+        """
+        charList = (list(range(48, 58)) +  # Numbers
+                    list(range(65, 91)) +  # Uppercase
+                    list(range(97, 123)))  # Lowercase
+        sysrand = SystemRandom()
+        sessionKey = ''.join(
+            chr(sysrand.choice(charList))
+            for i in range(64))
+        try:
+            createUserSessionKeyQuery = CassandraCluster.getPreparedStatement(
+                """
+                INSERT INTO usersessionkeys ( sessionkey, org, username,
+                    sessionid )
+                VALUES ( ?, ?, ?, ? )
+                """, keyspace=session.keyspace)
+            createUserSessionKeyQuery.consistency_level = consistency
+            session.execute(createUserSessionKeyQuery,
+                            (sessionKey, org, username, sessionId))
+            return sessionKey
+        except Exception as e:
+            log.critical("Exception in AuthDB.createUserSessionKey: %s" % (e,))
 
     @DB.sessionQuery(keyspace)
     def deletePasswordReset(org, username,
