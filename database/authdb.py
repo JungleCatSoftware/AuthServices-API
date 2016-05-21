@@ -228,6 +228,58 @@ class AuthDB(DB):
             log.critical("Exception in AuthDB.createUserSessionKey: %s" % (e,))
 
     @DB.sessionQuery(keyspace)
+    def deleteUserSession(org, username, sessionId,
+                          consistency=ConsistencyLevel.LOCAL_QUORUM,
+                          session=None):
+        """
+        Delete/remove a session record from AuthDB.usersessions.
+
+        :org:
+            Organization the user belongs to
+        :username:
+            Name of the user
+        :sessionId:
+            UUID of the session
+        :consistency:
+
+        """
+        deleteUserSessionQuery = CassandraCluster.getPreparedStatement(
+            """
+            DELETE FROM usersessions
+            WHERE org = ?
+            AND username = ?
+            AND sessionid = ?
+            """, keyspace=session.keyspace)
+        deleteUserSessionQuery.consistency_level = consistency
+        session.execute(deleteUserSessionQuery, (org, username, sessionId))
+
+    @DB.sessionQuery(keyspace)
+    def deleteUserSessionByKey(sessionKey,
+                               consistency=ConsistencyLevel.LOCAL_QUORUM,
+                               session=None):
+        """
+        Delete/remove a session key from AuthDB.usersessionkeys and remove the
+        associated session record from AuthDB.usersessions.
+
+        :sessionKey:
+            Key of the session to delete
+        :consistency:
+            Cassandra ConsistencyLevel (default LOCAL_QUORUM)
+        """
+        userSession = AuthDB.getUserSessionByKey(sessionKey)
+        deleteUserSessionByKeyQuery = CassandraCluster.getPreparedStatement(
+            """
+            DELETE FROM usersessionkeys
+            WHERE sessionkey = ?
+            """, keyspace=session.keyspace)
+        deleteUserSessionByKeyQuery.consistency_level = consistency
+        if userSession is not None:
+            AuthDB.deleteUserSession(userSession.org, userSession.username,
+                                     userSession.sessionid,
+                                     consistency=consistency)
+        session.execute(deleteUserSessionByKeyQuery, (sessionKey,))
+
+    @DB.sessionQuery(keyspace)
     def deletePasswordReset(org, username,
                             consistency=ConsistencyLevel.LOCAL_QUORUM,
                             session=None):

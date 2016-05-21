@@ -117,3 +117,34 @@ class Session(Resource):
                     'startdate': str(session.startdate),
                     'lastupdate': str(session.lastupdate)
                 }}, 200
+
+    def delete(self, username, org, sessionId=None):
+        """
+        Delete (invalidate) a user's session
+        """
+        parser = reqparse.RequestParser()
+        parser.add_argument('key', type=str, required=True,
+                            help='Valid session key',
+                            location=['headers', 'args'])
+        args = parser.parse_args()
+
+        sessionValid, sessionUser, sessionOrg = \
+            AuthDB.validateSessionKey(args['key'])
+
+        if not sessionValid:
+            return {'message':
+                    'Invalid session key'}, 401
+        elif not (sessionUser == username and sessionOrg == org):
+            return {'message':
+                    'You do not have permission to access this resource'}, 403
+
+        try:
+            if sessionId is None:
+                AuthDB.deleteUserSessionByKey(args['key'])
+            else:
+                AuthDB.deleteUserSession(org, username, sessionId)
+
+            return {'message': 'Session deleted'}, 200
+        except Exception as e:
+            log.error('Exception in Session.delete: %s' % (str(e),))
+            return {'message': 'Unexpected error deleting the session'}, 500

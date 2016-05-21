@@ -53,6 +53,19 @@ View information about a specific session belonging to a user. SessionId is a UU
  - 404: Unable to find session with given sessionId
  - 500: Unable to find session information for current session (when sessionId is "current")
 
+#### DELETE
+Delete a session by SessionID or current session (by current session key). This allows for "logging out" a current session or another (possibly remote) session.
+
+##### Parameters
+ - key: Valid session key
+
+##### Returns
+ - 200: Session deleted (or no session to delete)
+ - 400: Request missing parameters. See message for details.
+ - 401: Session key invalid or expired
+ - 403: Key is valid, but associated user does not have permissions to the resource.
+ - 500: Unexpected error
+
 ### /users
 #### POST
 Create a new user.
