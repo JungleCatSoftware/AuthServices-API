@@ -42,10 +42,13 @@ Create a new user.
  - org: Name of organization to create the user on.
  - email: User's email address. Used for sending password resets.
  - parentuser (optional): The parent user for user being created. Must follow the form "user@org".
+ - key (required if 'parentuser' defined): Session key for the parent user.
 
 ##### Returns
  - 200: User successfully created.
  - 400: User was not created. User may already exist, Org may be closed or non-existent. See message for specific details
+ - 401: Parentuser was given, but no session key was provided
+ - 403: Provided session key does not match the listed parent user
  - 500: Something unexpected happened. The user may not have been created.
 
 ### /users/\<user\>@\<org\>

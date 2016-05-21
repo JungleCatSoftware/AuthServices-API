@@ -21,6 +21,9 @@ class Users(Resource):
         parser.add_argument('parentuser', type=str, required=False,
                             help='Parent user in form of user@org',
                             default=None)
+        parser.add_argument('key', type=str, required=False,
+                            help='Valid session key of parentuser',
+                            default=None, location=['headers', 'form', 'args'])
         args = parser.parse_args()
 
         parentusername, parentuserorg = '', ''
@@ -28,6 +31,12 @@ class Users(Resource):
             parentusername, parentuserorg = args['parentuser'].split('@')
         except:
             pass
+
+        if args['key'] is not None:
+            sessionValid, sessionUser, sessionOrg = \
+                AuthDB.validateSessionKey(args['key'])
+        else:
+            sessionValid, sessionUser, sessionOrg = (False, '', '')
 
         try:
             if not AuthDB.userExists(args['org'], args['username']):
@@ -46,6 +55,21 @@ class Users(Resource):
                             (args['username'], args['org']) +
                             'Parent user "%s" does not exist.' %
                             (args['parentuser'],)}, 400
+                elif (args['parentuser'] is not None and
+                        args['key'] is None):
+                    return {'Message':
+                            'Cannot create user "%s@%s". ' %
+                            (args['username'], args['org']) +
+                            'Must provide valid session key for "%s" ' %
+                            (args['parentuser'],)}, 401
+                elif (args['parentuser'] is not None and
+                      not (sessionValid and sessionUser == parentusername and
+                           sessionOrg == parentuserorg)):
+                    return {'Message':
+                            'Cannot create user "%s@%s". ' %
+                            (args['username'], args['org']) +
+                            'Session key not valid for parent user "%s".' %
+                            (args['parentuser'],)}, 403
                 else:
                     AuthDB.createUser(args['org'], args['username'],
                                       args['email'], args['parentuser'],
