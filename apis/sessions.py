@@ -75,3 +75,45 @@ class Sessions(Resource):
                         % (username, org)}, 404
         except Exception as e:
             log.critical("Error in Sessions.post: %s" % (e,))
+
+
+class Session(Resource):
+    def get(self, username, org, sessionId=None):
+        """
+        List information about a user's session
+        """
+        parser = reqparse.RequestParser()
+        parser.add_argument('key', type=str, required=True,
+                            help='Valid session key',
+                            location=['headers', 'args'])
+        args = parser.parse_args()
+
+        sessionValid, sessionUser, sessionOrg = \
+            AuthDB.validateSessionKey(args['key'])
+
+        if not sessionValid:
+            return {'message':
+                    'Invalid session key'}, 401
+        elif not (sessionUser == username and sessionOrg == org):
+            return {'message':
+                    'You do not have permission to view this resource'}, 403
+
+        if sessionId is None:
+            session = AuthDB.getUserSessionByKey(args['key'])
+            if session is None:
+                return {'message': 'Server Error: Unable to get information ' +
+                        'for current session'}, 500
+        else:
+            session = AuthDB.getUserSession(org, username, sessionId)
+            if session is None:
+                return {'message': 'Unable to find session %s' %
+                        (str(sessionId),)}, 404
+
+        return {'message': 'Information for session %s' % (str(sessionId),),
+                'session': {
+                    'username': session.username,
+                    'org': session.org,
+                    'sessionid': str(session.sessionid),
+                    'startdate': str(session.startdate),
+                    'lastupdate': str(session.lastupdate)
+                }}, 200

@@ -33,6 +33,26 @@ Open session for a user
  - 400: Incorrect password
  - 404: Invalid user
 
+### /sessions/\<user\>@\<org\>/\<sessionId>
+#### GET
+View information about a specific session belonging to a user. SessionId is a UUID of a session or "current" to use the session key's session.
+
+##### Parameters
+ - key: Valid session key
+
+##### Returns
+ - 200: Hash containing:
+    - username: username of session owner
+    - org: org for the session owner
+    - sessionid: ID of the session
+    - startdate: Date the session was opened
+    - lastupdate: Date of the last time the session was refreshed
+ - 400: Request missing arguments. See message for details.
+ - 401: Session key invalid or expired
+ - 403: Key valid, but associated user is not allowed to access the requested resource.
+ - 404: Unable to find session with given sessionId
+ - 500: Unable to find session information for current session (when sessionId is "current")
+
 ### /users
 #### POST
 Create a new user.

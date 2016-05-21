@@ -33,6 +33,9 @@ api.add_resource(apis.users.CompletePasswordReset,
                  '/users/<string:username>@<string:org>/completepasswordreset')
 api.add_resource(apis.sessions.Sessions,
                  '/sessions/<string:username>@<string:org>')
+api.add_resource(apis.sessions.Session,
+                 '/sessions/<string:username>@<string:org>/<uuid:sessionId>',
+                 '/sessions/<string:username>@<string:org>/current')
 
 log.info("Application initialization complete and ready!")
 
