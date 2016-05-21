@@ -31,7 +31,6 @@ api.add_resource(apis.users.RequestPasswordReset,
                  '/users/<string:username>@<string:org>/requestpasswordreset')
 api.add_resource(apis.users.CompletePasswordReset,
                  '/users/<string:username>@<string:org>/completepasswordreset')
-
 api.add_resource(apis.sessions.Sessions,
                  '/sessions/<string:username>@<string:org>')
 
